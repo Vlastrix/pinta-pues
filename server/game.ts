@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { tools, WIDTH, HEIGHT, DEFAULT_AVATAR, AVATAR_PATTERN, MAX_DRAW_ACTIONS, type DrawAction, type Message, type Player, type RoomView, type Settings } from '../shared/types.js';
 import { Store, normalize } from './store.js';
 import { hintSteps, maskWord } from './hints.js';
+import { WindowLimiter } from './security.js';
 
 type Room = {
   code: string; host: string; players: Player[]; phase: RoomView['phase']; settings: Settings;
@@ -12,6 +13,7 @@ type Room = {
   queue: string[]; turn: number; timer?: ReturnType<typeof setTimeout>; pointCount: number;
   reporters: Set<string>; lastReportAt: number; penaltyPlayed: boolean;
   hint: string; hintTimer?: ReturnType<typeof setTimeout>;
+  banned: Set<string>;
 };
 const nameSchema = z.string().trim().min(2, 'Tu apodo necesita al menos 2 letras.').max(20);
 const avatarSchema = z.string().regex(AVATAR_PATTERN, 'Elige un avatar válido.').default(DEFAULT_AVATAR);
@@ -34,6 +36,7 @@ const settingsSchema = z.object({
 export class Game {
   rooms = new Map<string, Room>();
   membership = new Map<string, string>();
+  private activity = new WindowLimiter();
   constructor(private io: Server, private store: Store, private timing: { choice: number; reveal: number; turn?: number } = { choice: 15000, reveal: 5000 }) {
     io.on('connection', socket => this.connect(socket));
   }
@@ -52,6 +55,7 @@ export class Game {
       actions: room.actions, messages: room.messages, availableCategories: [...this.store.categories(), 'Personalizadas'],
       customWordCount: room.customWords.length,
       reported: room.reporters.has(id),
+      reportCount: room.reporters.size, reportRequired: room.players.filter(player => player.id !== room.drawer).length,
     };
   }
   private broadcast(room: Room) {
@@ -140,6 +144,7 @@ export class Game {
     this.membership.delete(socket.id); socket.leave(room.code);
     const player = room.players.find(player => player.id === socket.id)!;
     room.players = room.players.filter(player => player.id !== socket.id);
+    room.reporters.delete(socket.id);
     if (!room.players.length) { this.clearTimers(room); this.rooms.delete(room.code); return; }
     if (room.host === socket.id) room.host = room.players[0].id;
     this.system(room, `${player.name} salió de la sala.`);
@@ -156,7 +161,10 @@ export class Game {
         try {
           const now = Date.now();
           if (now - windowStart > 1000) { windowStart = now; events = 0; }
-          if (++events > 100) throw new Error('Un poquito más despacio, pues.');
+          if (++events > 100) {
+            if (events > 200) socket.disconnect(true);
+            throw new Error('Un poquito más despacio, pues.');
+          }
           const parsed = schema.safeParse(raw);
           if (!parsed.success) throw new Error(parsed.error.issues[0].message);
           const room = this.rooms.get(this.membership.get(socket.id) ?? '');
@@ -172,31 +180,65 @@ export class Game {
     handle('room:create', z.object({ name: nameSchema, avatar: avatarSchema }), ({ name, avatar }) => {
       if (this.membership.has(socket.id)) throw new Error('Ya estás en una sala.');
       if (this.rooms.size >= 200) throw new Error('El servidor está lleno. Prueba en un rato.');
+      if (!this.activity.allow(`create:${socket.data.ip}`, 10, 60000)) throw new Error('Demasiadas salas creadas. Espera un minuto.');
       let code: string;
       do { code = randomBytes(4).toString('hex').slice(0, 6).toUpperCase(); } while (this.rooms.has(code));
       const room: Room = {
-        code, host: socket.id, players: [{ id: socket.id, name, avatar, score: 0, guessed: false }],
+        code, host: socket.id, players: [{ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId) }],
         phase: 'lobby', settings: { rounds: 3, duration: 100, categories: ['Bolivia', 'Cotidianas'] },
         round: 0, drawer: null, deadline: 0, word: '', choices: [], actions: [], messages: [],
         customWords: [], used: new Set(), queue: [], turn: 0, pointCount: 0,
         reporters: new Set(), lastReportAt: 0, penaltyPlayed: false,
         hint: '',
+        banned: new Set(),
       };
       this.rooms.set(code, room); this.membership.set(socket.id, code); socket.join(code);
       this.system(room, `${name} creó la sala. ¡Que entre la tropa!`); this.broadcast(room);
     }, false);
     handle('room:join', z.object({ name: nameSchema, avatar: avatarSchema, code: z.string().trim().toUpperCase().regex(/^[A-F0-9]{6}$/) }), ({ name, avatar, code }) => {
       if (this.membership.has(socket.id)) throw new Error('Ya estás en una sala.');
+      if (!this.activity.allow(`join:${socket.data.ip}`, 30, 60000)) throw new Error('Demasiados intentos de entrar. Espera un minuto.');
       const room = this.rooms.get(code);
       if (!room) throw new Error('Esa sala no existe o ya se cerró.');
+      if ((socket.data.identities as string[]).some(id => room.banned.has(id))) throw new Error('Fuiste expulsado de esta sala.');
+      if (socket.data.userId && room.players.some(player => this.io.sockets.sockets.get(player.id)?.data.userId === socket.data.userId)) throw new Error('Tu cuenta ya está en esta sala.');
       if (room.players.length >= 12) throw new Error('La sala está llena (12 jugadores).');
       if (!['lobby', 'finished'].includes(room.phase)) throw new Error('La partida ya empezó. Entra cuando termine.');
       if (room.players.some(player => normalize(player.name) === normalize(name))) throw new Error('Ese apodo ya está en la sala.');
-      room.players.push({ id: socket.id, name, avatar, score: 0, guessed: false });
+      room.players.push({ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId) });
       this.membership.set(socket.id, code); socket.join(code);
       this.system(room, `${name} llegó. ¡Ahora sí!`); this.broadcast(room);
     }, false);
     handle('room:leave', z.object({}), () => { this.leave(socket); socket.emit('room:left'); });
+    handle('room:moderate', z.object({ target: z.string().min(1).max(100), action: z.enum(['kick', 'mute', 'unmute']) }), ({ target, action }, room) => {
+      this.requireHost(socket, room!);
+      if (target === socket.id) throw new Error('No puedes moderarte a vos mismo.');
+      const player = room!.players.find(player => player.id === target);
+      if (!player) throw new Error('Ese jugador ya no está en la sala.');
+      const targetSocket = this.io.sockets.sockets.get(target);
+      if (!targetSocket) throw new Error('Ese jugador ya no está conectado.');
+      this.store.logModeration(room!.code, socket.data.identities[0], targetSocket.data.identities[0], action);
+      if (action === 'kick') {
+        for (const id of targetSocket.data.identities as string[]) room!.banned.add(id);
+        // Remove public messages by this name before the remaining members receive a new snapshot.
+        room!.messages = room!.messages.filter(message => message.kind !== 'chat' || message.name !== player.name);
+        this.system(room!, `${player.name} fue expulsado por el anfitrión.`);
+        this.leave(targetSocket);
+        targetSocket.emit('room:kicked', { reason: 'El anfitrión te expulsó de la sala.' });
+      } else {
+        player.muted = action === 'mute';
+        this.system(room!, player.muted ? `El anfitrión silenció el chat de ${player.name}.` : `${player.name} puede volver a chatear.`);
+        this.broadcast(room!);
+      }
+    });
+    handle('chat:delete', z.object({ id: z.string().max(100) }), ({ id }, room) => {
+      this.requireHost(socket, room!);
+      const message = room!.messages.find(message => message.id === id && message.kind === 'chat');
+      if (!message) throw new Error('Ese mensaje ya no está disponible.');
+      room!.messages = room!.messages.filter(message => message.id !== id);
+      this.store.logModeration(room!.code, socket.data.identities[0], message.name, 'delete-message');
+      this.broadcast(room!);
+    });
     handle('room:settings', settingsSchema, (settings, room) => {
       this.requireHost(socket, room!);
       if (!['lobby', 'finished'].includes(room!.phase)) throw new Error('Cambia las reglas entre partidas.');
@@ -231,6 +273,7 @@ export class Game {
       if (Date.now() - lastChat < 350) throw new Error('Dale un respiro al chat.');
       lastChat = Date.now();
       const player = room!.players.find(player => player.id === socket.id)!;
+      if (player.muted && !(room!.phase === 'drawing' && socket.id !== room!.drawer && !player.guessed && normalize(text) === normalize(room!.word))) throw new Error('Tu chat está silenciado. Solo puedes enviar la respuesta correcta.');
       if (room!.phase === 'drawing') {
         if (Date.now() >= room!.deadline) throw new Error('El tiempo para adivinar terminó.');
         if (room!.drawer === socket.id || player.guessed) throw new Error('Espera al siguiente turno para chatear.');
@@ -260,6 +303,8 @@ export class Game {
       this.io.to(room!.code).emit('sound:play', 'report');
       if (!room!.penaltyPlayed && room!.players.filter(player => player.id !== room!.drawer).every(player => room!.reporters.has(player.id))) {
         room!.penaltyPlayed = true;
+        const drawer = room!.players.find(player => player.id === room!.drawer)!;
+        this.store.logModeration(room!.code, 'unanimous-vote', this.io.sockets.sockets.get(drawer.id)?.data.identities[0] ?? drawer.id, 'report-unanimous');
         this.system(room!, 'Todos reportaron al pintor. ¡Oof!');
         this.io.to(room!.code).emit('sound:play', 'penalty');
       }

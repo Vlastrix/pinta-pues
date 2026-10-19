@@ -136,14 +136,14 @@ test('MP3 reales: denuncia unánime reproduce Steve y Roblox, respeta silencio y
     await expect(page.getByLabel('Volumen de efectos')).toHaveValue('20');
     await page.getByRole('button', { name: '¡A pintar, pues!' }).click();
     const choice = page.locator('.word-choices button').first(); const word = (await choice.innerText()).trim(); await choice.click();
-    await guest.getByRole('button', { name: 'Reportar al pintor', exact: true }).click();
-    await expect.poll(() => count(page)).toBe(2); await expect.poll(() => count(guest)).toBe(2);
-    await expect(guest.getByRole('button', { name: 'Pintor reportado' })).toBeDisabled();
     await page.getByRole('button', { name: 'Texto', exact: true }).click();
     await page.getByLabel('Texto para el lienzo').fill(word);
     await page.getByLabel('Lienzo para dibujar').click({ position: { x: 120, y: 90 } });
     await expect(page.getByRole('status')).toContainText('No escribas la respuesta');
-    expect(await count(page)).toBe(2); expect(await count(guest)).toBe(2);
+    expect(await count(page)).toBe(0); expect(await count(guest)).toBe(0);
+    await guest.getByRole('button', { name: 'Reportar al pintor', exact: true }).click();
+    await expect.poll(() => count(page)).toBe(2); await expect.poll(() => count(guest)).toBe(2);
+    await expect(guest.getByRole('button', { name: 'Pintor reportado' })).toBeDisabled();
     await page.getByRole('button', { name: 'Silenciar sonidos' }).click();
     await expect(page.getByLabel('Volumen de efectos')).toHaveCount(0);
     expect(await page.evaluate(() => (window as unknown as { observedAudio: { stops: number } }).observedAudio.stops)).toBeGreaterThan(0);

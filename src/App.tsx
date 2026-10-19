@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { io } from 'socket.io-client';
-import { ArrowRight, Check, Circle, Copy, Crown, Eraser, Flag, Heart, LogOut, Minus, PaintBucket, Pencil, Play, Plus, Send, Sparkles, Square, Star, Trash2, Trophy, Type, Undo2, Users, Volume2, VolumeX } from 'lucide-react';
-import type { CursorUpdate, DrawingCursor, DrawAction, RoomView, Settings, SoundEffect, Tool } from '../shared/types';
+import { ArrowRight, Check, Circle, Copy, Crown, Eraser, Flag, Heart, LogOut, Minus, MoreHorizontal, PaintBucket, Pencil, Play, Plus, Send, Sparkles, Square, Star, Trash2, Trophy, Type, Undo2, Users, Volume2, VolumeX } from 'lucide-react';
+import type { AccountUser, CursorUpdate, DrawingCursor, DrawAction, RoomView, Settings, SoundEffect, Tool } from '../shared/types';
 import { AVATAR_PATTERN, DEFAULT_AVATAR } from '../shared/types';
 import { Canvas } from './Canvas';
 import { SoundPlayer } from './sound';
 import { AvatarImage, AvatarPicker } from './AvatarPicker';
+import { AccountPanel } from './AccountPanel';
+import { ModerationDialog } from './ModerationDialog';
 
 const socket = io({ autoConnect: false });
+let sessionRequest: Promise<{ user: AccountUser | null }> | undefined;
+function session() {
+  return sessionRequest ??= fetch('/api/session', { credentials: 'same-origin' }).then(response => {
+    if (!response.ok) throw new Error('No se pudo iniciar la sesión.');
+    return response.json();
+  });
+}
 const colors = ['#292438', '#ffffff', '#ef5350', '#f79839', '#f4c747', '#68b565', '#26999c', '#4a85d3', '#7460bf', '#d783b2', '#885c43', '#9c9aa7'];
 const toolOptions = [
   { id: 'brush', label: 'Pincel', icon: Pencil }, { id: 'eraser', label: 'Borrador', icon: Eraser },
@@ -37,6 +46,8 @@ function Doodle({ small = false }: { small?: boolean }) {
 
 export default function App() {
   const [room, setRoom] = useState<RoomView | null>(null);
+  const [account, setAccount] = useState<AccountUser | null>(null);
+  const [moderatingId, setModeratingId] = useState<string | null>(null);
   const [remoteCursor, setRemoteCursor] = useState<CursorUpdate | null>(null);
   const [connected, setConnected] = useState(socket.connected);
   const [name, setName] = useState(() => localStorage.getItem('pinta-name') ?? '');
@@ -76,6 +87,7 @@ export default function App() {
     });
   }
   useEffect(() => {
+    let active = true;
     let roomOnWire: RoomView | null = null;
     let bufferedActions: DrawAction[] = [];
     let bufferedCursor: CursorUpdate | null = null;
@@ -95,7 +107,7 @@ export default function App() {
       });
     };
     const onConnect = () => setConnected(true);
-    const onDisconnect = () => { clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setConnected(false); setRoom(null); setPending(false); toast('Se cortó la conexión. Vuelve a entrar a la sala cuando se reconecte.'); };
+    const onDisconnect = () => { const wasPlaying = Boolean(roomOnWire); clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setConnected(false); setRoom(null); setPending(false); if (wasPlaying) toast('Se cortó la conexión. Vuelve a entrar a la sala cuando se reconecte.'); };
     const onState = (next: RoomView) => { clearBufferedUpdates(); roomOnWire = next; if (next.phase !== 'drawing') setRemoteCursor(null); offset.current = next.serverTime - Date.now(); setRoom(next); setCode(next.code); history.replaceState({}, '', `?sala=${next.code}`); };
     const onCursor = (update: CursorUpdate) => { bufferedCursor = update; scheduleFrame(); };
     socket.on('board:cursor', onCursor);
@@ -107,12 +119,15 @@ export default function App() {
     const onHint = (hint: string) => setRoom(previous => previous?.phase === 'drawing' ? { ...previous, hint } : previous);
     socket.on('word:hint', onHint);
     const onLeft = () => { clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setRoom(null); history.replaceState({}, '', location.pathname); };
+    const onKicked = ({ reason }: { reason: string }) => { onLeft(); setModeratingId(null); toast(reason); };
+    socket.on('room:kicked', onKicked);
     const onSound = (effect: SoundEffect) => { if (effect === 'report' || effect === 'penalty') void sounds.current?.play(effect).catch(() => toast('No se pudo reproducir el audio.')); };
     socket.on('sound:play', onSound);
     socket.on('connect', onConnect); socket.on('disconnect', onDisconnect); socket.on('room:state', onState); socket.on('board:action', onAction); socket.on('room:left', onLeft);
-    socket.on('connect_error', () => setConnected(false)); socket.connect();
+    socket.on('connect_error', error => { setConnected(false); toast(error.message); });
+    void session().then(data => { if (active) { setAccount(data.user); socket.connect(); } }).catch(() => { if (active) { toast('No se pudo preparar la sesión. Recarga para intentar otra vez.'); } });
     const timer = setInterval(() => setNow(Date.now()), 250);
-    return () => { clearBufferedUpdates(); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); sounds.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
+    return () => { active = false; clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); sounds.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
   }, []);
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [room?.messages.length, room?.messages.at(-1)?.id]);
   useEffect(() => {
@@ -124,6 +139,7 @@ export default function App() {
   const isDrawer = Boolean(room && room.drawer === room.you);
   const drawing = Boolean(isDrawer && room?.phase === 'drawing');
   const player = room?.players.find(player => player.id === room.you);
+  const chatDisabled = Boolean(room && ((room.phase === 'drawing' && (isDrawer || player?.guessed)) || (player?.muted && room.phase !== 'drawing')));
   const editable = Boolean(room && ['lobby', 'finished'].includes(room.phase));
   const seconds = room?.deadline ? Math.max(0, Math.ceil((room.deadline - now - offset.current) / 1000)) : 0;
   function enter(event: FormEvent) {
@@ -154,6 +170,7 @@ export default function App() {
     <header className="site-header">
       <a className="brand" href="/" onClick={event => { if (room) event.preventDefault(); }} aria-label="Pinta Pues inicio"><span className="brand-icon"><Pencil size={24} /></span><span>Pinta<span className="brand-purple">Pues</span><span className="brand-dot">.</span></span></a>
       <div className="header-right">{!connected && <span className="connection"><i />Conectando…</span>}<span className="made-in">Hecho en Bolivia <span className="flag">▰</span></span>
+        {!room && <AccountPanel user={account} disabled={!connected} onChanged={user => { setAccount(user); socket.disconnect(); socket.connect(); }} />}
         {room && <button className="icon-button" title="Salir de la sala" aria-label="Salir de la sala" onClick={() => emit('room:leave', {})}><LogOut size={19} /></button>}
       </div>
     </header>
@@ -183,7 +200,8 @@ export default function App() {
       <div className="game-grid">
         <aside className="players-panel panel"><div className="panel-heading"><Trophy size={17} /><h2>La tropa</h2><span>{room.players.length}</span></div>
           <div className="player-list">{[...room.players].sort((a, b) => b.score - a.score).map((item, index) => <div className={`player ${item.id === room.drawer ? 'active' : ''} ${item.guessed ? 'guessed' : ''}`} key={item.id}>
-            <span className="player-rank">{index + 1}</span><span className="avatar player-avatar"><AvatarImage seed={item.avatar} alt={`Avatar de ${item.name}`} /></span><div><strong>{item.name}{item.id === room.you && <small> (vos)</small>}</strong><span>{item.score} puntos</span></div><span className="player-indicator">{item.guessed ? <Check size={16} /> : item.id === room.drawer ? <Pencil size={16} /> : item.id === room.host ? <Crown size={16} /> : null}</span>
+            <span className="player-rank">{index + 1}</span><span className="avatar player-avatar"><AvatarImage seed={item.avatar} alt={`Avatar de ${item.name}`} /></span><div><strong>{item.name}{item.id === room.you && <small> (vos)</small>}</strong><span>{item.score} puntos{item.muted && ' · Chat silenciado'}</span></div><span className="player-indicator">{item.guessed ? <Check size={16} /> : item.id === room.drawer ? <Pencil size={16} /> : item.id === room.host ? <Crown size={16} /> : null}</span>
+            {isHost && item.id !== room.you && <button className="player-menu" aria-label={`Moderar a ${item.name}`} title={`Moderar a ${item.name}`} onClick={() => setModeratingId(item.id)}><MoreHorizontal size={16} /></button>}
           </div>)}</div><div className="players-note">{editable ? 'Pasá el enlace al grupo. Las risas se multiplican.' : `Ronda ${room.round} de ${room.settings.rounds}`}<span>✳</span></div>
         </aside>
         <section className="board-column">
@@ -199,10 +217,13 @@ export default function App() {
             </div> : <><Canvas actions={room.actions} enabled={drawing} tool={tool} color={color} size={size} text={text} onAction={sendAction}
               remoteCursor={room.phase === 'drawing' && remoteCursor?.drawer === room.drawer ? remoteCursor.cursor : null} onCursor={sendCursor} />
               {room.phase === 'choosing' && <div className="board-overlay"><span className="choice-icon"><Pencil size={32} /></span><h2>{isDrawer ? '¿Qué vas a dibujar?' : 'Se está cocinando el dibujo…'}</h2><p>{isDrawer ? 'Elegí una. La tropa confía en tu talento.' : 'En un ratito empieza el turno.'}</p>{room.choices && <div className="word-choices">{room.choices.map(word => <button className="button secondary" key={word} onClick={() => emit('game:choose', { word })}>{word}</button>)}</div>}</div>}
-              {room.phase === 'reveal' && <div className="reveal-banner"><Sparkles size={18} />Era «{room.word}». ¡Siguiente turno en {seconds}s!</div>}
+              {room.phase === 'reveal' && <div className="reveal-banner">
+                <span className="reveal-icon"><Sparkles size={30} /></span>
+                <div className="reveal-copy"><span>La palabra era</span><strong role="status">{room.word}</strong><p>¡Siguiente turno en <b>{seconds}s</b>!</p></div>
+              </div>}
             </>}
           </div>
-          {room.phase === 'drawing' && !isDrawer && <div className="report-row"><button className="report-button" disabled={room.reported} title="Avisa a la sala; no descuenta puntos automáticamente" onClick={() => emit('game:report', {})}><Flag size={14} />{room.reported ? 'Pintor reportado' : 'Reportar al pintor'}</button></div>}
+          {room.phase === 'drawing' && !isDrawer && <div className="report-row"><button className="report-button" aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} disabled={room.reported} title="Es una broma: activa avisos y sonidos, sin cambiar puntos ni terminar el turno" onClick={() => emit('game:report', {})}><Flag size={14} />{room.reported ? 'Pintor reportado' : 'Reportar al pintor'}<span>{room.reportCount}/{room.reportRequired}</span></button></div>}
           <div className={`toolbar panel ${!drawing ? 'disabled-tools' : ''}`}><div className="tools">{toolOptions.map(({ id, label, icon: Icon }) => <button className={`tool-button ${tool === id ? 'selected' : ''}`} title={label} aria-label={label} aria-pressed={tool === id} key={id} disabled={!drawing} onClick={() => setTool(id)}><Icon size={19} /></button>)}<span className="tool-divider" /><button className="tool-button" title="Deshacer" aria-label="Deshacer" disabled={!drawing || !room.actions.length} onClick={() => emit('board:undo', {})}><Undo2 size={18} /></button><button className="tool-button" title="Limpiar lienzo" aria-label="Limpiar lienzo" disabled={!drawing || !room.actions.length} onClick={() => emit('board:clear', {})}><Trash2 size={17} /></button></div>
             <div className="color-row"><div className="palette">{colors.map(value => <button key={value} aria-label={`Color ${value}`} title={value} disabled={!drawing} className={`swatch ${color === value ? 'selected' : ''}`} style={{ background: value }} onClick={() => setColor(value)} />)}<label className="custom-color" title="Otro color"><Plus size={15} /><input type="color" aria-label="Color personalizado" disabled={!drawing} value={color} onChange={e => setColor(e.target.value)} /></label></div><label className="brush-size">Grosor<input aria-label="Grosor del pincel" type="range" min="2" max="40" disabled={!drawing} value={size} onChange={e => setSize(Number(e.target.value))} /><span>{size}</span></label></div>
             {tool === 'text' && <input ref={textInput} className="canvas-text" aria-label="Texto para el lienzo" placeholder="Primero escribí acá; después tocá el lienzo para colocarlo." value={text} maxLength={50} disabled={!drawing} onChange={e => setText(e.target.value)} />}
@@ -211,11 +232,12 @@ export default function App() {
         </section>
         <aside className="chat-panel panel"><div className="panel-heading"><span className="chat-bubble">···</span><h2>El chisme</h2><button className="icon-button" aria-label={muted ? 'Activar sonidos' : 'Silenciar sonidos'} title={muted ? 'Activar sonidos' : 'Silenciar sonidos'} disabled={loadingAudio} onClick={() => void toggleSounds()}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button></div>
           {!muted && <label className="sound-volume">Volumen<input aria-label="Volumen de efectos" type="range" min="0" max="100" value={Math.round(volume * 100)} onChange={event => { const value = Number(event.target.value) / 100; setVolume(value); sounds.current?.setVolume(value); }} /></label>}
-          <div className="messages" aria-live="polite" aria-label="Chat de la sala">{room.messages.map(message => <div className={`message ${message.kind}`} key={message.id}>{message.kind === 'chat' ? <><strong>{message.name}</strong><span>{message.text}</span></> : <span>{message.kind === 'correct' ? '✦ ' : ''}{message.text}</span>}</div>)}<div ref={bottom} /></div>
-          <form className="chat-form" onSubmit={event => { event.preventDefault(); if (chat.trim()) emit('chat:send', { text: chat }, () => setChat('')); }}><label className="sr-only" htmlFor="guess">Tu respuesta o mensaje</label><input id="guess" autoComplete="off" placeholder={room.phase === 'drawing' ? isDrawer || player?.guessed ? '¡Shhh! Guardá el secreto.' : '¿Qué será, pues?' : 'Decí algo a la tropa…'} maxLength={200} value={chat} disabled={room.phase === 'drawing' && (isDrawer || player?.guessed)} onChange={e => setChat(e.target.value)} /><button aria-label="Enviar mensaje" disabled={!chat.trim() || (room.phase === 'drawing' && (isDrawer || player?.guessed))}><Send size={18} /></button></form><p className="chat-tip">{room.phase === 'drawing' ? 'Escribí la palabra aquí para adivinar.' : 'Se permiten chistes malos. Dibujos también.'}</p>
+          <div className="messages" aria-live="polite" aria-label="Chat de la sala">{room.messages.map(message => <div className={`message ${message.kind}`} key={message.id}>{message.kind === 'chat' ? <><strong>{message.name}</strong><span>{message.text}</span>{isHost && <button className="delete-message" aria-label={`Borrar mensaje de ${message.name}`} title="Borrar mensaje" onClick={() => emit('chat:delete', { id: message.id })}><Trash2 size={12} /></button>}</> : <span>{message.kind === 'correct' ? '✦ ' : ''}{message.text}</span>}</div>)}<div ref={bottom} /></div>
+          <form className="chat-form" onSubmit={event => { event.preventDefault(); if (chat.trim()) emit('chat:send', { text: chat }, () => setChat('')); }}><label className="sr-only" htmlFor="guess">Tu respuesta o mensaje</label><input id="guess" autoComplete="off" placeholder={room.phase === 'drawing' ? isDrawer || player?.guessed ? '¡Shhh! Guardá el secreto.' : '¿Qué será, pues?' : 'Decí algo a la tropa…'} maxLength={200} value={chat} disabled={chatDisabled} onChange={e => setChat(e.target.value)} /><button aria-label="Enviar mensaje" disabled={!chat.trim() || chatDisabled}><Send size={18} /></button></form><p className="chat-tip">{room.phase === 'drawing' ? 'Escribí la palabra aquí para adivinar.' : 'Se permiten chistes malos. Dibujos también.'}</p>
         </aside>
       </div>
     </main>}
+    <ModerationDialog player={isHost ? room?.players.find(player => player.id === moderatingId) ?? null : null} onClose={() => setModeratingId(null)} onAction={(target, action) => emit('room:moderate', { target, action })} />
     <footer className="site-footer"><span>Pinta Pues <span className="footer-spark">✳</span> Con cariño, desde Bolivia.</span></footer>
     {notice && <div className="toast" role="status">{notice}<button aria-label="Cerrar aviso" onClick={() => setNotice('')}>×</button></div>}
   </div>;

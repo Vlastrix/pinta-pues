@@ -8,7 +8,7 @@ export default defineConfig({
   build: { outDir: 'dist/client' },
   server: {
     proxy: {
-      '/api': apiTarget,
+      '/api': { target: apiTarget, changeOrigin: false },
       '/socket.io': { target: apiTarget, ws: true },
     },
   },

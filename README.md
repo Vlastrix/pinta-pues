@@ -4,7 +4,7 @@ Juego web de dibujar y adivinar para la tropa. Inspirado en la mecánica de Pint
 
 ## Primera versión
 
-- Salas privadas por código o enlace, con 2 a 12 jugadores y sin registro.
+- Salas privadas por código o enlace, con 2 a 12 jugadores. Puedes jugar como invitado o crear una cuenta opcional con correo y contraseña.
 - Avatar elegible junto al apodo: robots de DiceBear, opciones nuevas al azar y elección guardada en el navegador. Se comparte con todos los jugadores de la sala.
 - Anfitrión que configura entre 1 y 5 rondas, tiempo por turno y categorías.
 - Cada jugador dibuja una vez por ronda. Elige entre tres palabras; si no elige en 15 segundos, se selecciona una automáticamente.
@@ -20,7 +20,8 @@ Juego web de dibujar y adivinar para la tropa. Inspirado en la mecánica de Pint
 - Adivinar concede entre 100 y 500 puntos según el tiempo restante. El dibujante recibe 100 por cada acierto. Al adivinar todos o agotarse el tiempo, se revela la respuesta durante 5 segundos.
 - Clasificación, revancha y resultados de partidas terminadas guardados en SQLite.
 - Sonidos con silencio y volumen: tono al acertar, Steve (Minecraft) al denunciar y Roblox cuando todos los demás jugadores denuncian al dibujante. Activados por defecto al crear o unirse a una sala, con volumen al 35%; pulsa el altavoz del chat para silenciarlos o reactivarlos.
-- Denunciar el dibujo avisa a la sala y reproduce Steve a quienes tengan sonidos activos. Una denuncia por jugador y turno, con 3 segundos entre denuncias de la sala. Cuando todos los jugadores presentes excepto el dibujante han denunciado, suena Roblox para la sala, una sola vez por turno y después de Steve. En una partida de dos personas basta la denuncia del único adivinador. No descuenta puntos ni expulsa automáticamente. Escribir la respuesta en el lienzo se rechaza sin reproducir efectos.
+- Reportar al pintor es una broma: avisa a la sala y reproduce Steve a quienes tengan sonidos activos. Un reporte por jugador y turno, con 3 segundos entre reportes de la sala. Cuando todos los demás jugadores presentes lo reportan, suena Roblox una sola vez. No cambia los puntos, no termina el turno y no expulsa. En partidas de dos personas basta el reporte del único adivinador. Escribir la respuesta en el lienzo se rechaza sin reproducir efectos.
+- El anfitrión puede silenciar o habilitar el chat de otros jugadores, borrar mensajes y expulsar con confirmación. Silenciar no impide enviar un acierto: solo las respuestas correctas pasan al servidor y puntúan. La expulsión bloquea la misma cuenta y navegador durante la vida de la sala y borra los mensajes públicos de ese apodo.
 - Interfaz adaptable a escritorio y móvil; dibujo con mouse, lápiz o pantalla táctil.
 
 ## Stack y arquitectura
@@ -34,9 +35,24 @@ Juego web de dibujar y adivinar para la tropa. Inspirado en la mecánica de Pint
 | Persistencia | SQLite mediante `node:sqlite`, con WAL y espera de bloqueo |
 | Despliegue | Un servidor, Docker Compose y Caddy para HTTPS |
 
-El backend controla turnos, reloj, aciertos, puntuación y permisos. La respuesta y las opciones se envían solamente al dibujante hasta la revelación; los demás reciben una pista con guiones. El dibujante y quienes ya acertaron no pueden enviar mensajes durante el dibujo.
+El backend controla turnos, reloj, aciertos, puntuación y permisos. La respuesta y las opciones se envían solamente al dibujante hasta la revelación; los demás reciben una pista con guiones. El dibujante y quienes ya acertaron no pueden enviar mensajes durante el dibujo. Las acciones del anfitrión y los reportes unánimes se validan y registran en el servidor. Los reportes de broma están separados de la moderación del anfitrión.
 
-Las salas, trazos, chat, puntuación en curso y palabras personalizadas viven en memoria. SQLite conserva el catálogo inicial y los resultados finales, sin guardar cada movimiento del mouse. Una sala se elimina al salir su último jugador.
+Las salas, expulsiones de sala, trazos, chat, puntuación en curso y palabras personalizadas viven en memoria. SQLite conserva el catálogo inicial, los resultados finales, las cuentas, sesiones y registro de moderación, sin guardar cada movimiento del mouse. Una sala se elimina al salir su último jugador.
+
+## Cuentas y moderación
+
+Usa «Entrar con cuenta» en la cabecera para registrarte o iniciar sesión. El correo identifica la cuenta; dentro del juego sigues eligiendo tu apodo y avatar. Una cuenta solo puede ocupar un puesto por sala. Puedes cerrar sesión desde «Mi cuenta» fuera de la sala.
+
+- Contraseñas de 10 a 128 caracteres, con salt aleatorio y scrypt (N=32768, r=8, p=3), una configuración documentada por [OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). No se guardan contraseñas en texto plano.
+- Sesiones de 7 días en cookies HttpOnly y SameSite=Strict; en producción también Secure. SQLite guarda el hash del token, no el token original. Cerrar sesión invalida el token y desconecta sus conexiones activas.
+- Verificación de origen en cambios de cuenta y conexiones del navegador, límite de JSON a 8 KB, y máximo de 4 derivaciones de contraseña simultáneas.
+- Hasta 15 intentos de registro/inicio por IP y 10 por correo cada 15 minutos; hasta 240 solicitudes API por IP/minuto.
+- Hasta 60 conexiones nuevas por IP/minuto, 24 simultáneas por IP y 1.000 conexiones globales. Las salas están limitadas a 200 y 12 jugadores por sala; creación a 10 por IP/minuto y entradas a 30 por IP/minuto.
+- Se mantiene el límite de 100 eventos por conexión/segundo, con desconexión al superar 200 en la ventana. Las imágenes, mensajes y pistas se muestran como contenido, sin ejecutar HTML proporcionado por usuarios.
+
+En las tarjetas de jugadores, el anfitrión abre «Moderar a…» para silenciar o expulsar. La papelera junto a un mensaje permite borrarlo. No se aplica un filtro de malas palabras: las jergas y bromas del grupo siguen permitidas.
+
+Detrás del Caddy incluido en Compose se usa `TRUST_PROXY=1` para contar la IP real. Fuera de ese despliegue deja `TRUST_PROXY=0` y no habilites la confianza en cabeceras si el backend recibe tráfico directo de Internet.
 
 ## Ejecutar en desarrollo
 
@@ -120,8 +136,7 @@ compose.yaml        Aplicación, almacenamiento y Caddy
 - **Reconexión:** al desconectarse, el jugador sale y pierde su puntuación; el anfitrión pasa al siguiente jugador. No se admiten ingresos a partidas en curso. Si quedan menos de dos, se vuelve a la sala de espera. Falta recuperar sesiones con un período de gracia.
 - **Reinicios:** interrumpen las partidas activas; catálogo y resultados finales permanecen en disco. Las palabras personalizadas desaparecen con la sala.
 - **Un solo proceso:** no ejecutar réplicas ni un clúster de Node. Redis y PostgreSQL se evaluarán si la carga medida requiere distribuir partidas.
-- **Abuso:** hay validación de datos, límite de eventos por conexión, límites de salas/jugadores/lienzo, pausas de chat y avisos de denuncia. No hay cuentas, expulsiones, votación de sanciones, moderación ni protección integral contra ataques; faltan antes de abrirlo masivamente al público.
-- **Audios:** los archivos proporcionados están en `public/audio/roblox-death-sound-effect.mp3` y `public/audio/steve-old-hurt-sound-effect.mp3`. Para reemplazarlos, conserva los nombres o actualiza `src/sound.ts`. Falta definir sanciones de puntuación o votaciones si se quieren añadir; los sonidos actuales no implican una sanción automática.
+- **Límites de seguridad:** los invitados pueden evadir el bloqueo de navegador borrando sus cookies; las cuentas sí conservan su bloqueo de sala al reconectar. No hay verificación de correo, recuperación de contraseña, MFA ni sanciones globales. Los límites locales no sustituyen la protección contra DDoS del proveedor; los bloqueos de sala y contadores de frecuencia se reinician con el proceso.
 - **Biblioteca personal:** falta guardar y administrar paquetes propios entre sesiones, editar el catálogo desde la interfaz y consultar el historial guardado.
 - **Dibujo:** falta zoom, atajos y relleno con tolerancia ajustable. Los límites actuales son 8.000 operaciones y 60.000 puntos por turno; deshacer o limpiar libera espacio.
 - **Calidad visual:** Canvas usa fuentes y suavizado del navegador; el aspecto del texto y los bordes puede variar ligeramente entre dispositivos.

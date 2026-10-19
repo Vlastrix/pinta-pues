@@ -26,6 +26,18 @@ export class Store {
       CREATE TABLE IF NOT EXISTS results (
         id INTEGER PRIMARY KEY, room_code TEXT NOT NULL, finished_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         scores TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
+      CREATE TABLE IF NOT EXISTS moderation (
+        id INTEGER PRIMARY KEY, room_code TEXT NOT NULL, actor TEXT NOT NULL, target TEXT NOT NULL,
+        action TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );`);
     const insert = this.db.prepare('INSERT OR IGNORE INTO words(category, text) VALUES (?, ?)');
     this.db.exec('BEGIN');
@@ -43,6 +55,9 @@ export class Store {
   }
   saveResult(code: string, players: { name: string; score: number }[]) {
     this.db.prepare('INSERT INTO results(room_code, scores) VALUES (?, ?)').run(code, JSON.stringify(players));
+  }
+  logModeration(code: string, actor: string, target: string, action: string) {
+    this.db.prepare('INSERT INTO moderation(room_code, actor, target, action) VALUES (?, ?, ?, ?)').run(code, actor, target, action);
   }
   close() { this.db.close(); }
 }

@@ -8,12 +8,13 @@ export type Tool = typeof tools[number];
 export type Point = { x: number; y: number };
 export type DrawingCursor = { point: Point; color: string; size: number; tool: Tool; drawing: boolean };
 export type CursorUpdate = { drawer: string; cursor: DrawingCursor | null };
+export type AccountUser = { id: string; email: string };
 export type DrawAction = {
   id: string; segment?: number; tool: Tool; color: string; size: number; points: Point[]; text?: string;
 };
 export const DEFAULT_AVATAR = 'pinta-pues-1';
 export const AVATAR_PATTERN = /^[a-z0-9-]{1,48}$/;
-export type Player = { id: string; name: string; avatar: string; score: number; guessed: boolean };
+export type Player = { id: string; name: string; avatar: string; score: number; guessed: boolean; muted: boolean; registered: boolean };
 export type Message = { id: string; name: string; text: string; kind: 'chat' | 'system' | 'correct' };
 export type Settings = { rounds: number; duration: number; categories: string[] };
 export type Phase = 'lobby' | 'choosing' | 'drawing' | 'reveal' | 'finished';
@@ -23,5 +24,6 @@ export type RoomView = {
   settings: Settings; round: number; drawer: string | null;
   deadline: number; serverTime: number; hint: string; word?: string; choices?: string[];
   actions: DrawAction[]; messages: Message[]; availableCategories: string[]; customWordCount: number; reported: boolean;
+  reportCount: number; reportRequired: number;
 };
 export type Ack = (result: { ok: boolean; error?: string }) => void;

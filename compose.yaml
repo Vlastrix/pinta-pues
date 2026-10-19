@@ -6,6 +6,7 @@ services:
       PORT: 3001
       HOST: 0.0.0.0
       DB_PATH: /app/data/pinta-pues.sqlite
+      TRUST_PROXY: "1"
     volumes:
       - pinta_data:/app/data
   caddy:
