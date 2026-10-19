@@ -1,0 +1,27 @@
+export const WIDTH = 960;
+export const HEIGHT = 640;
+export const DRAW_INTERVAL_MS = 24;
+export const CURSOR_INTERVAL_MS = 32;
+export const MAX_DRAW_ACTIONS = 8000;
+export const tools = ['brush', 'eraser', 'line', 'rectangle', 'ellipse', 'star', 'fill', 'text'] as const;
+export type Tool = typeof tools[number];
+export type Point = { x: number; y: number };
+export type DrawingCursor = { point: Point; color: string; size: number; tool: Tool; drawing: boolean };
+export type CursorUpdate = { drawer: string; cursor: DrawingCursor | null };
+export type DrawAction = {
+  id: string; segment?: number; tool: Tool; color: string; size: number; points: Point[]; text?: string;
+};
+export const DEFAULT_AVATAR = 'pinta-pues-1';
+export const AVATAR_PATTERN = /^[a-z0-9-]{1,48}$/;
+export type Player = { id: string; name: string; avatar: string; score: number; guessed: boolean };
+export type Message = { id: string; name: string; text: string; kind: 'chat' | 'system' | 'correct' };
+export type Settings = { rounds: number; duration: number; categories: string[] };
+export type Phase = 'lobby' | 'choosing' | 'drawing' | 'reveal' | 'finished';
+export type SoundEffect = 'report' | 'penalty';
+export type RoomView = {
+  code: string; you: string; host: string; players: Player[]; phase: Phase;
+  settings: Settings; round: number; drawer: string | null;
+  deadline: number; serverTime: number; hint: string; word?: string; choices?: string[];
+  actions: DrawAction[]; messages: Message[]; availableCategories: string[]; customWordCount: number; reported: boolean;
+};
+export type Ack = (result: { ok: boolean; error?: string }) => void;
