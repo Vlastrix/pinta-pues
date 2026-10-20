@@ -264,7 +264,7 @@ export default function App() {
       </div>
     </main>}
     <ModerationDialog player={isHost ? room?.players.find(player => player.id === moderatingId) ?? null : null} onClose={() => setModeratingId(null)} onAction={(target, action) => emit('room:moderate', { target, action })} />
-    <footer className="site-footer"><span>Pinta Pues <span className="footer-spark">✳</span> Con cariño, desde Bolivia.</span></footer>
+    <footer className="site-footer"><span>Pinta Pues <span className="footer-spark">✳</span> Con cariño, desde Bolivia.</span><small>© {new Date().getFullYear()} Vanguard &amp; TheOutBounded</small></footer>
     {notice && <div className="toast" role="status">{notice}<button aria-label="Cerrar aviso" onClick={() => setNotice('')}>×</button></div>}
   </div>;
 }
