@@ -1,15 +1,18 @@
 import type { SoundEffect } from '../shared/types';
 
-const files: Record<SoundEffect, string> = {
+type Effect = SoundEffect | 'correct' | 'finish';
+const files: Record<Effect, string> = {
   report: '/audio/steve-old-hurt-sound-effect.mp3',
   penalty: '/audio/roblox-death-sound-effect.mp3',
+  correct: '/audio/success.mp3',
+  finish: '/audio/success-fanfare-trumpets.mp3',
 };
 
-/** One context, unlocked by a user click, shared by the MP3 effects and success tone. */
+/** One context, unlocked by a user click, shared by all MP3 effects. */
 export class SoundPlayer {
   private context: AudioContext;
   private gain: GainNode;
-  private buffers = new Map<SoundEffect, Promise<AudioBuffer>>();
+  private buffers = new Map<Effect, Promise<AudioBuffer>>();
   private active = new Set<AudioScheduledSourceNode>();
   private enabled = false;
   private nextEffectAt = 0;
@@ -19,7 +22,7 @@ export class SoundPlayer {
     this.gain.connect(this.context.destination);
     this.setVolume(volume);
   }
-  private load(effect: SoundEffect) {
+  private load(effect: Effect) {
     let buffer = this.buffers.get(effect);
     if (!buffer) {
       buffer = fetch(files[effect]).then(async response => {
@@ -32,7 +35,7 @@ export class SoundPlayer {
   }
   async enable() {
     await this.context.resume();
-    await Promise.all([this.load('report'), this.load('penalty')]);
+    await Promise.all([this.load('report'), this.load('penalty'), this.load('correct'), this.load('finish')]);
     this.enabled = true;
   }
   mute() {
@@ -51,25 +54,22 @@ export class SoundPlayer {
     source.onended = () => { this.active.delete(source); source.disconnect(); };
     source.start(at);
   }
-  async play(effect: SoundEffect) {
+  async play(effect: Effect) {
     if (!this.enabled || this.context.state !== 'running') return;
     const buffer = await this.load(effect);
     if (!this.enabled || this.context.state !== 'running') return;
     const source = this.context.createBufferSource();
     source.buffer = buffer; source.connect(this.gain);
     // The last report plays Steve first, followed by Roblox, without cutting it off.
-    const at = Math.max(this.context.currentTime, this.nextEffectAt);
+    const interrupt = effect === 'correct' || effect === 'finish';
+    const at = interrupt ? this.context.currentTime : Math.max(this.context.currentTime, this.nextEffectAt);
+    this.start(source, at, interrupt);
     this.nextEffectAt = at + buffer.duration;
-    this.start(source, at, false);
   }
   correct() {
-    if (!this.enabled || this.context.state !== 'running') return;
-    const oscillator = this.context.createOscillator(); const envelope = this.context.createGain();
-    oscillator.connect(envelope); envelope.connect(this.gain);
-    const now = this.context.currentTime;
-    oscillator.frequency.setValueAtTime(520, now); oscillator.frequency.exponentialRampToValueAtTime(900, now + 0.15);
-    envelope.gain.setValueAtTime(0.2, now); envelope.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-    this.start(oscillator); oscillator.stop(now + 0.3);
-    oscillator.onended = () => { this.active.delete(oscillator); oscillator.disconnect(); envelope.disconnect(); };
+    return this.play('correct');
+  }
+  finish() {
+    return this.play('finish');
   }
 }

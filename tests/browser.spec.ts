@@ -178,7 +178,7 @@ test('móvil: portada y sala caben en la pantalla, palabras propias y salida', a
   await expect(page.getByRole('button', { name: '¡Armemos la sala!' })).toBeVisible();
 });
 
-test('MP3 reales: denuncia unánime reproduce Steve y Roblox, respeta silencio y volumen', async ({ page, browser }) => {
+test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', async ({ page, browser }) => {
   // Observe real Web Audio sources while still letting Chromium decode and play the MP3s.
   const observeAudio = () => {
     const state = { starts: 0, stops: 0 };
@@ -192,7 +192,12 @@ test('MP3 reales: denuncia unánime reproduce Steve y Roblox, respeta silencio y
     };
   };
   await page.addInitScript(observeAudio);
+  const successResponse = page.waitForResponse(response => response.url().endsWith('/audio/success.mp3'));
+  const fanfareResponse = page.waitForResponse(response => response.url().endsWith('/audio/success-fanfare-trumpets.mp3'));
   const code = await createRoom(page);
+  expect((await successResponse).ok()).toBe(true);
+  expect((await fanfareResponse).ok()).toBe(true);
+  await page.getByLabel('Rondas', { exact: true }).selectOption('1');
   const context = await browser.newContext(); await context.addInitScript(observeAudio);
   const guest = await context.newPage();
   const count = (target: Page) => target.evaluate(() => (window as unknown as { observedAudio: { starts: number } }).observedAudio.starts);
@@ -222,10 +227,29 @@ test('MP3 reales: denuncia unánime reproduce Steve y Roblox, respeta silencio y
     await guest.getByLabel('Tu respuesta o mensaje').fill(word);
     await guest.getByRole('button', { name: 'Enviar mensaje' }).click();
     await expect(guest.locator('.word-strip strong')).toHaveText(word);
-    await expect(guest.locator('.word-choices button').first()).toBeVisible({ timeout: 10000 });
-    const next = guest.locator('.word-choices button').first(); await next.click();
-    await page.getByRole('button', { name: 'Reportar al pintor', exact: true }).click();
-    await expect.poll(() => count(guest)).toBe(4);
+    await expect.poll(() => count(guest)).toBe(3);
     expect(await count(page)).toBe(2);
+    await expect(guest.locator('.word-choices button').first()).toBeVisible({ timeout: 10000 });
+    const next = guest.locator('.word-choices button').first(); const finalWord = (await next.innerText()).trim(); await next.click();
+    await page.getByRole('button', { name: 'Reportar al pintor', exact: true }).click();
+    await expect.poll(() => count(guest)).toBe(5);
+    expect(await count(page)).toBe(2);
+    await page.getByLabel('Tu respuesta o mensaje').fill(finalWord);
+    await page.getByRole('button', { name: 'Enviar mensaje' }).click();
+    await expect.poll(() => count(guest)).toBe(6); // Final acierto, todavía sin fanfarria.
+    await expect(guest.locator('.winner')).toHaveCount(0);
+    await expect(guest.locator('.winner')).toBeVisible({ timeout: 10000 });
+    await expect.poll(() => count(guest)).toBe(7); // Una sola fanfarria al mostrar al ganador.
+    expect(await count(page)).toBe(2); // El jugador silenciado tampoco oye el final.
+    await page.getByRole('button', { name: 'Activar sonidos' }).click();
+    await expect(page.getByRole('button', { name: 'Silenciar sonidos' })).toBeEnabled();
+    expect(await count(page)).toBe(2); // Reactivar sonidos no repite la celebración.
+    await guest.getByLabel('Tu respuesta o mensaje').fill('gg tropa');
+    await guest.getByRole('button', { name: 'Enviar mensaje' }).click();
+    await expect(page.getByText('gg tropa', { exact: true })).toBeVisible();
+    expect(await count(guest)).toBe(7); // Actualizar el chat no repite el audio.
+    await page.getByRole('button', { name: '¡Sale la revancha!' }).click();
+    await expect(page.locator('.word-choices button').first()).toBeVisible();
+    expect(await count(guest)).toBe(7);
   } finally { await context.close(); }
 });

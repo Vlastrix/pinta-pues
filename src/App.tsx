@@ -64,6 +64,7 @@ export default function App() {
   const [volume, setVolume] = useState(0.35); const [loadingAudio, setLoadingAudio] = useState(false);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const bottom = useRef<HTMLDivElement>(null);
   const sounds = useRef<SoundPlayer | null>(null); const previousCorrect = useRef<string | undefined>(undefined);
+  const previousGame = useRef<{ code: string; phase: RoomView['phase'] } | null>(null);
   async function enableSounds() {
     setLoadingAudio(true);
     try { sounds.current ??= new SoundPlayer(volume); await sounds.current.enable(); setMuted(false); }
@@ -132,9 +133,16 @@ export default function App() {
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [room?.messages.length, room?.messages.at(-1)?.id]);
   useEffect(() => {
     const message = room?.messages.filter(message => message.kind === 'correct').at(-1);
-    if (message && previousCorrect.current && previousCorrect.current !== message.id && !muted) sounds.current?.correct();
+    if (message && previousCorrect.current && previousCorrect.current !== message.id && !muted) void sounds.current?.correct().catch(() => toast('No se pudo reproducir el audio de acierto.'));
     previousCorrect.current = message?.id ?? 'none';
   }, [room?.messages, muted]);
+  useEffect(() => {
+    const previous = previousGame.current;
+    if (room?.phase === 'finished' && previous?.code === room.code && previous.phase !== 'finished' && !muted) {
+      void sounds.current?.finish().catch(() => toast('No se pudo reproducir el audio de final de partida.'));
+    }
+    previousGame.current = room ? { code: room.code, phase: room.phase } : null;
+  }, [room?.code, room?.phase, muted]);
   const isHost = room?.host === room?.you;
   const isDrawer = Boolean(room && room.drawer === room.you);
   const drawing = Boolean(isDrawer && room?.phase === 'drawing');
