@@ -1,13 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-
-const seeds: Record<string, string[]> = {
-  Bolivia: ['salteña', 'llajua', 'teleférico', 'charango', 'api morado', 'chola', 'Illimani', 'anticucho', 'toborochi', 'marraqueta', 'caporal', 'ekeko', 'trancadera', 'caserita', 'choclo'],
-  Cotidianas: ['bicicleta', 'paraguas', 'gato', 'helado', 'astronauta', 'volcán', 'castillo', 'pulpo', 'guitarra', 'dinosaurio', 'avión', 'pizza', 'robot', 'tiburón', 'mochila'],
-  Sistemas: ['bug', 'teclado', 'servidor', 'base de datos', 'programador', 'cable de red', 'mouse', 'computadora', 'wifi', 'nube', 'impresora', 'pantalla azul'],
-  Anime: ['Naruto', 'Goku', 'Pikachu', 'Dragon Ball', 'Death Note', 'Luffy', 'Totoro', 'Pokébola', 'Shenlong', 'Doraemon', 'kunai', 'Sharingan'],
-};
+import { seeds } from './words.js';
 
 export function normalize(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');

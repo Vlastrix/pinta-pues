@@ -9,6 +9,77 @@ async function createRoom(page: Page) {
   return await page.locator('.room-heading h1>span').innerText();
 }
 
+test('atajos: herramientas, deshacer sincronizado y escritura sin interferencias', async ({ page, browser }) => {
+  const code = await createRoom(page);
+  const tool = (name: string) => page.getByRole('button', { name, exact: true });
+  await page.locator('body').click({ position: { x: 0, y: 0 } });
+  await page.keyboard.press('r');
+  await expect(tool('Pincel')).toHaveAttribute('aria-pressed', 'true');
+  const context = await browser.newContext(); const guest = await context.newPage();
+  try {
+    await guest.goto(`/?sala=${code}`);
+    await guest.getByLabel('¿Cómo te dice la tropa?').fill('Caserita');
+    await guest.getByRole('button', { name: 'Entrar a la sala' }).click();
+    await expect(page.getByRole('button', { name: '¡A pintar, pues!' })).toBeEnabled();
+    await page.getByRole('button', { name: '¡A pintar, pues!' }).click();
+    await page.locator('.word-choices button').first().click();
+    const options = [
+      ['p', 'Pincel'], ['e', 'Borrador'], ['l', 'Línea'], ['r', 'Cuadrado'],
+      ['o', 'Círculo'], ['s', 'Estrella'], ['f', 'Relleno'], ['t', 'Texto'],
+    ];
+    for (const [index, [key, label]] of options.entries()) {
+      await page.keyboard.press(key);
+      await expect(tool(label)).toHaveAttribute('aria-pressed', 'true');
+      await expect(tool(label)).toHaveAttribute('title', new RegExp(key.toUpperCase()));
+      await page.keyboard.press('b');
+      await expect(tool('Pincel')).toHaveAttribute('aria-pressed', 'true');
+      await page.keyboard.press(String(index + 1));
+      await expect(tool(label)).toHaveAttribute('aria-pressed', 'true');
+    }
+    await page.keyboard.press('b');
+    await page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', ctrlKey: true, cancelable: true })));
+    await expect(tool('Pincel')).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Meta+z'); // Empty board: no server error or action.
+    await expect(tool('Deshacer')).toBeDisabled();
+    const canvas = page.getByLabel('Lienzo para dibujar');
+    await canvas.click({ position: { x: 90, y: 90 } });
+    await expect(tool('Deshacer')).toBeEnabled();
+    const viewer = guest.getByLabel('Dibujo de la partida');
+    const ink = () => viewer.evaluate((canvas: HTMLCanvasElement) => {
+      const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+      return data.some((value, i) => i % 4 !== 3 && value < 200);
+    });
+    await expect.poll(ink).toBe(true);
+    await page.keyboard.press('Control+z');
+    await expect(tool('Deshacer')).toBeDisabled();
+    await expect.poll(ink).toBe(false);
+    await canvas.click({ position: { x: 90, y: 90 } });
+    await expect(tool('Deshacer')).toBeEnabled();
+    await page.keyboard.press('Meta+z');
+    await expect(tool('Deshacer')).toBeDisabled();
+    await page.keyboard.press('t');
+    const input = page.getByLabel('Texto para el lienzo');
+    await input.fill(''); await input.pressSequentially('pelforst12345678');
+    await expect(input).toHaveValue('pelforst12345678');
+    await expect(tool('Texto')).toHaveAttribute('aria-pressed', 'true');
+    await canvas.click({ position: { x: 120, y: 120 } });
+    await expect(tool('Deshacer')).toBeEnabled();
+    await input.focus(); await input.press('Control+z');
+    await expect(tool('Deshacer')).toBeEnabled();
+    await guest.getByLabel('Tu respuesta o mensaje').fill('');
+    await guest.getByLabel('Tu respuesta o mensaje').pressSequentially('pelforst12345678');
+    await expect(guest.getByLabel('Tu respuesta o mensaje')).toHaveValue('pelforst12345678');
+    await guest.locator('body').click({ position: { x: 0, y: 0 } });
+    await guest.keyboard.press('r'); await guest.keyboard.press('Control+z');
+    await expect(guest.getByRole('button', { name: 'Pincel', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(tool('Deshacer')).toBeEnabled();
+    await page.getByRole('button', { name: 'Moderar a Caserita' }).click();
+    await page.keyboard.press('b'); await page.keyboard.press('Control+z');
+    await expect(tool('Texto')).toHaveAttribute('aria-pressed', 'true');
+    await expect(tool('Deshacer')).toBeEnabled();
+  } finally { await context.close(); }
+});
+
 test('partida entre dos navegadores: sala, figuras, texto protegido, relleno y acierto', async ({ page, browser }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const code = await createRoom(page);

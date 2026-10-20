@@ -10,6 +10,7 @@
 .canvas-stack > canvas:last-of-type { touch-action: none; }
 .canvas-stack.can-draw > canvas:last-of-type { cursor: none; }
 .drawing-cursor { position: absolute; width: 0; height: 0; pointer-events: none; z-index: 2; }
+.drawing-cursor[data-tool="eraser"] { transform: translate(-50%, -50%); box-sizing: border-box; border: 1px solid #302b3c; border-radius: 50%; box-shadow: 0 0 0 1px #fff; }
 .pencil-cursor-icon { position: absolute; left: -6px; top: -33px; transform-origin: 6px 33px; filter: drop-shadow(1px 2px 1px #302b3c30); }
 .is-drawing .pencil-cursor-icon { animation: pencil-scribble .16s ease-in-out infinite alternate; }
 .pencil-contact { position: absolute; left: -3px; top: -3px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .4; animation: pencil-contact .35s ease-in-out infinite alternate; }

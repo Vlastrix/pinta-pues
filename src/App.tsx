@@ -19,10 +19,10 @@ function session() {
 }
 const colors = ['#292438', '#ffffff', '#ef5350', '#f79839', '#f4c747', '#68b565', '#26999c', '#4a85d3', '#7460bf', '#d783b2', '#885c43', '#9c9aa7'];
 const toolOptions = [
-  { id: 'brush', label: 'Pincel', icon: Pencil }, { id: 'eraser', label: 'Borrador', icon: Eraser },
-  { id: 'line', label: 'Línea', icon: Minus }, { id: 'rectangle', label: 'Cuadrado', icon: Square },
-  { id: 'ellipse', label: 'Círculo', icon: Circle }, { id: 'star', label: 'Estrella', icon: Star },
-  { id: 'fill', label: 'Relleno', icon: PaintBucket }, { id: 'text', label: 'Texto', icon: Type },
+  { id: 'brush', label: 'Pincel', icon: Pencil, shortcuts: ['p', 'b', '1'] }, { id: 'eraser', label: 'Borrador', icon: Eraser, shortcuts: ['e', '2'] },
+  { id: 'line', label: 'Línea', icon: Minus, shortcuts: ['l', '3'] }, { id: 'rectangle', label: 'Cuadrado', icon: Square, shortcuts: ['r', '4'] },
+  { id: 'ellipse', label: 'Círculo', icon: Circle, shortcuts: ['o', '5'] }, { id: 'star', label: 'Estrella', icon: Star, shortcuts: ['s', '6'] },
+  { id: 'fill', label: 'Relleno', icon: PaintBucket, shortcuts: ['f', '7'] }, { id: 'text', label: 'Texto', icon: Type, shortcuts: ['t', '8'] },
 ] as const;
 
 function Doodle({ small = false }: { small?: boolean }) {
@@ -138,6 +138,24 @@ export default function App() {
   const isHost = room?.host === room?.you;
   const isDrawer = Boolean(room && room.drawer === room.you);
   const drawing = Boolean(isDrawer && room?.phase === 'drawing');
+  useEffect(() => {
+    function shortcut(event: KeyboardEvent) {
+      if (!drawing || event.defaultPrevented || event.isComposing || event.repeat || document.querySelector('dialog[open]')) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && key === 'z') {
+        event.preventDefault();
+        if (room?.actions.length) void emit('board:undo', {});
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      const option = toolOptions.find(option => option.shortcuts.some(shortcut => shortcut === key));
+      if (option) { event.preventDefault(); setTool(option.id); }
+    }
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  }, [drawing, room?.actions.length]);
   const player = room?.players.find(player => player.id === room.you);
   const chatDisabled = Boolean(room && ((room.phase === 'drawing' && (isDrawer || player?.guessed)) || (player?.muted && room.phase !== 'drawing')));
   const editable = Boolean(room && ['lobby', 'finished'].includes(room.phase));
@@ -224,7 +242,7 @@ export default function App() {
             </>}
           </div>
           {room.phase === 'drawing' && !isDrawer && <div className="report-row"><button className="report-button" aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} disabled={room.reported} title="Es una broma: activa avisos y sonidos, sin cambiar puntos ni terminar el turno" onClick={() => emit('game:report', {})}><Flag size={14} />{room.reported ? 'Pintor reportado' : 'Reportar al pintor'}<span>{room.reportCount}/{room.reportRequired}</span></button></div>}
-          <div className={`toolbar panel ${!drawing ? 'disabled-tools' : ''}`}><div className="tools">{toolOptions.map(({ id, label, icon: Icon }) => <button className={`tool-button ${tool === id ? 'selected' : ''}`} title={label} aria-label={label} aria-pressed={tool === id} key={id} disabled={!drawing} onClick={() => setTool(id)}><Icon size={19} /></button>)}<span className="tool-divider" /><button className="tool-button" title="Deshacer" aria-label="Deshacer" disabled={!drawing || !room.actions.length} onClick={() => emit('board:undo', {})}><Undo2 size={18} /></button><button className="tool-button" title="Limpiar lienzo" aria-label="Limpiar lienzo" disabled={!drawing || !room.actions.length} onClick={() => emit('board:clear', {})}><Trash2 size={17} /></button></div>
+          <div className={`toolbar panel ${!drawing ? 'disabled-tools' : ''}`}><div className="tools">{toolOptions.map(({ id, label, icon: Icon, shortcuts }) => <button className={`tool-button ${tool === id ? 'selected' : ''}`} title={`${label} (${shortcuts.join(' / ').toUpperCase()})`} aria-label={label} aria-keyshortcuts={shortcuts.join(' ').toUpperCase()} aria-pressed={tool === id} key={id} disabled={!drawing} onClick={() => setTool(id)}><Icon size={19} /></button>)}<span className="tool-divider" /><button className="tool-button" title="Deshacer (Ctrl+Z / ⌘Z)" aria-label="Deshacer" aria-keyshortcuts="Control+Z Meta+Z" disabled={!drawing || !room.actions.length} onClick={() => emit('board:undo', {})}><Undo2 size={18} /></button><button className="tool-button" title="Limpiar lienzo" aria-label="Limpiar lienzo" disabled={!drawing || !room.actions.length} onClick={() => emit('board:clear', {})}><Trash2 size={17} /></button></div>
             <div className="color-row"><div className="palette">{colors.map(value => <button key={value} aria-label={`Color ${value}`} title={value} disabled={!drawing} className={`swatch ${color === value ? 'selected' : ''}`} style={{ background: value }} onClick={() => setColor(value)} />)}<label className="custom-color" title="Otro color"><Plus size={15} /><input type="color" aria-label="Color personalizado" disabled={!drawing} value={color} onChange={e => setColor(e.target.value)} /></label></div><label className="brush-size">Grosor<input aria-label="Grosor del pincel" type="range" min="2" max="40" disabled={!drawing} value={size} onChange={e => setSize(Number(e.target.value))} /><span>{size}</span></label></div>
             {tool === 'text' && <input ref={textInput} className="canvas-text" aria-label="Texto para el lienzo" placeholder="Primero escribí acá; después tocá el lienzo para colocarlo." value={text} maxLength={50} disabled={!drawing} onChange={e => setText(e.target.value)} />}
           </div>

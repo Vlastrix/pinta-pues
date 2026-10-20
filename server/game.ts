@@ -30,7 +30,7 @@ const actionSchema = z.object({
 });
 const settingsSchema = z.object({
   rounds: z.number().int().min(1).max(5), duration: z.number().int().min(30).max(180),
-  categories: z.array(z.string().max(30)).min(1).max(5),
+  categories: z.array(z.string().max(30)).min(1).max(30),
 });
 
 export class Game {
