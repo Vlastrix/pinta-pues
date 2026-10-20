@@ -142,4 +142,40 @@
   color: #81738e;
 }
 .footer-spark { font-size: 16px; }
+@media (max-width: 650px) {
+  .game-grid > .chat-panel { order: 1; }
+  .game-grid > .players-panel { order: 2; }
+  .app-shell:has(.active-round) > .site-header { height: 58px; }
+  .game-page:has(.active-round) { padding-top: 12px; }
+  .active-game-heading { gap: 8px 12px; margin-bottom: 10px; }
+  .active-game-heading .eyebrow { display: none; }
+  .active-game-heading .word-strip { min-height: 44px; padding: 6px 10px; }
+  .active-round { gap: 10px; }
+  .active-round.is-guessing .disabled-tools,
+  .active-round .board-caption { display: none; }
+  .active-round.is-guessing .canvas-stack {
+    min-height: 0;
+    width: min(100%, max(180px, calc((var(--visual-height, 100dvh) - 470px) * 1.5)));
+    margin-inline: auto;
+  }
+  .active-round .report-row { margin-top: 6px; }
+  .active-round > .chat-panel { height: auto; min-height: 0; max-height: none; }
+  .active-round .chat-panel > .panel-heading { min-height: 36px; padding: 7px 12px; }
+  .active-round .sound-volume { padding: 6px 12px; }
+  .active-round .messages { flex: none; height: clamp(36px, calc(var(--visual-height, 100dvh) * .085), 72px); padding: 8px 12px; overscroll-behavior-y: contain; }
+  .active-round .message { margin-bottom: 8px; }
+  .chat-panel .chat-form input { font-size: 16px; }
+  .active-round .chat-panel .chat-form { margin: 6px 10px 10px; }
+  .active-round .chat-tip { display: none; }
+  .app-shell:has(.chat-focused .active-round) > .site-header { display: none; }
+  .chat-focused:has(.active-round) { padding-top: 6px; }
+  .chat-focused .active-game-heading > :not(.turn-header) { display: none; }
+  .chat-focused .active-game-heading .turn-header { grid-row: 1; }
+  .chat-focused .active-round.is-guessing .canvas-stack {
+    width: min(100%, calc(var(--visual-height, 100dvh) * .42));
+    margin-inline: auto;
+  }
+  .chat-focused .active-round .sound-volume { display: none; }
+  .chat-focused .active-round .messages { height: clamp(32px, calc(var(--visual-height, 100dvh) * .09), 56px); }
+}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}

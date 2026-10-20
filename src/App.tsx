@@ -61,6 +61,7 @@ export default function App() {
   const [tool, setTool] = useState<Tool>('brush'); const [color, setColor] = useState(colors[0]); const [size, setSize] = useState(6); const [text, setText] = useState('');
   const textInput = useRef<HTMLInputElement>(null);
   const [chat, setChat] = useState(''); const [words, setWords] = useState(''); const [muted, setMuted] = useState(false);
+  const [chatFocused, setChatFocused] = useState(false);
   const [volume, setVolume] = useState(0.35); const [loadingAudio, setLoadingAudio] = useState(false);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const bottom = useRef<HTMLDivElement>(null);
   const sounds = useRef<SoundPlayer | null>(null); const previousCorrect = useRef<string | undefined>(undefined);
@@ -130,7 +131,27 @@ export default function App() {
     const timer = setInterval(() => setNow(Date.now()), 250);
     return () => { active = false; clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); sounds.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
   }, []);
-  useEffect(() => { bottom.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [room?.messages.length, room?.messages.at(-1)?.id]);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () => document.documentElement.style.setProperty('--visual-height', `${viewport?.height ?? window.innerHeight}px`);
+    resize();
+    viewport?.addEventListener('resize', resize);
+    window.addEventListener('resize', resize);
+    return () => {
+      viewport?.removeEventListener('resize', resize);
+      window.removeEventListener('resize', resize);
+      document.documentElement.style.removeProperty('--visual-height');
+    };
+  }, []);
+  useEffect(() => {
+    const messages = bottom.current?.parentElement;
+    messages?.scrollTo({ top: messages.scrollHeight, behavior: 'smooth' });
+  }, [room?.messages.length, room?.messages.at(-1)?.id]);
+  useEffect(() => {
+    setChatFocused(false);
+    const focused = document.activeElement;
+    if (window.matchMedia('(max-width: 650px)').matches && focused instanceof HTMLInputElement && focused.id === 'guess') focused.blur();
+  }, [room?.code, room?.phase, room?.drawer]);
   useEffect(() => {
     const message = room?.messages.filter(message => message.kind === 'correct').at(-1);
     if (message && previousCorrect.current && previousCorrect.current !== message.id && !muted) void sounds.current?.correct().catch(() => toast('No se pudo reproducir el audio de acierto.'));
@@ -166,6 +187,7 @@ export default function App() {
   }, [drawing, room?.actions.length]);
   const player = room?.players.find(player => player.id === room.you);
   const chatDisabled = Boolean(room && ((room.phase === 'drawing' && (isDrawer || player?.guessed)) || (player?.muted && room.phase !== 'drawing')));
+  useEffect(() => { if (chatDisabled) setChatFocused(false); }, [chatDisabled]);
   const editable = Boolean(room && ['lobby', 'finished'].includes(room.phase));
   const seconds = room?.deadline ? Math.max(0, Math.ceil((room.deadline - now - offset.current) / 1000)) : 0;
   function enter(event: FormEvent) {
@@ -215,7 +237,7 @@ export default function App() {
         </form><div className="entry-note"><Users size={16} /> De 2 a 12 amigos · Gratis · Sin registro</div>
       </div></section>
       <section className="how-it-works"><div><span>01</span><p><strong>Juntá a la tropa</strong>Creá una sala y pasá el enlace.</p></div><div><span>02</span><p><strong>Dibujá lo que te toque</strong>¿Algo filosófico? ¿Goku? Vos podés.</p></div><div><span>03</span><p><strong>Adiviná antes que todos</strong>Más rápido, más puntos. Así de fácil.</p></div></section>
-    </main> : <main className="game-page">
+    </main> : <main className={`game-page ${chatFocused ? 'chat-focused' : ''}`}>
       <div className={`room-heading ${!editable ? 'active-game-heading' : ''}`}><div><span className="eyebrow">LA TROPA ESTÁ REUNIDA</span><h1>Sala <span>{room.code}</span></h1></div>
         {!editable && <div className="turn-header">
           <div className="board-top"><div><span className="status-dot" /><strong>{room.phase === 'choosing' ? isDrawer ? 'Elegí tu palabra' : 'El dibujante está eligiendo' : room.phase === 'reveal' ? '¡Así era, pues!' : isDrawer ? 'Te toca dibujar' : `${room.players.find(p => p.id === room.drawer)?.name} está dibujando`}</strong></div><span className={`timer ${seconds <= 10 ? 'urgent' : ''}`}>{seconds}s</span></div>
@@ -223,7 +245,7 @@ export default function App() {
         </div>}
         <div className="room-meta"><span><Users size={17} />{room.players.length}/12</span><button className="button secondary" onClick={invite}>Invitar amigos <Plus size={17} /></button></div>
       </div>
-      <div className="game-grid">
+      <div className={`game-grid ${!editable ? 'active-round' : ''} ${drawing ? 'is-drawing' : 'is-guessing'}`}>
         <aside className="players-panel panel"><div className="panel-heading"><Trophy size={17} /><h2>La tropa</h2><span>{room.players.length}</span></div>
           <div className="player-list">{[...room.players].sort((a, b) => b.score - a.score).map((item, index) => <div className={`player ${item.id === room.drawer ? 'active' : ''} ${item.guessed ? 'guessed' : ''}`} key={item.id}>
             <span className="player-rank">{index + 1}</span><span className="avatar player-avatar"><AvatarImage seed={item.avatar} alt={`Avatar de ${item.name}`} /></span><div><strong>{item.name}{item.id === room.you && <small> (vos)</small>}</strong><span>{item.score} puntos{item.muted && ' · Chat silenciado'}</span></div><span className="player-indicator">{item.guessed ? <Check size={16} /> : item.id === room.drawer ? <Pencil size={16} /> : item.id === room.host ? <Crown size={16} /> : null}</span>
@@ -259,7 +281,7 @@ export default function App() {
         <aside className="chat-panel panel"><div className="panel-heading"><span className="chat-bubble">···</span><h2>El chisme</h2><button className="icon-button" aria-label={muted ? 'Activar sonidos' : 'Silenciar sonidos'} title={muted ? 'Activar sonidos' : 'Silenciar sonidos'} disabled={loadingAudio} onClick={() => void toggleSounds()}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button></div>
           {!muted && <label className="sound-volume">Volumen<input aria-label="Volumen de efectos" type="range" min="0" max="100" value={Math.round(volume * 100)} onChange={event => { const value = Number(event.target.value) / 100; setVolume(value); sounds.current?.setVolume(value); }} /></label>}
           <div className="messages" aria-live="polite" aria-label="Chat de la sala">{room.messages.map(message => <div className={`message ${message.kind}`} key={message.id}>{message.kind === 'chat' ? <><strong>{message.name}</strong><span>{message.text}</span>{isHost && <button className="delete-message" aria-label={`Borrar mensaje de ${message.name}`} title="Borrar mensaje" onClick={() => emit('chat:delete', { id: message.id })}><Trash2 size={12} /></button>}</> : <span>{message.kind === 'correct' ? '✦ ' : ''}{message.text}</span>}</div>)}<div ref={bottom} /></div>
-          <form className="chat-form" onSubmit={event => { event.preventDefault(); if (chat.trim()) emit('chat:send', { text: chat }, () => setChat('')); }}><label className="sr-only" htmlFor="guess">Tu respuesta o mensaje</label><input id="guess" autoComplete="off" placeholder={room.phase === 'drawing' ? isDrawer || player?.guessed ? '¡Shhh! Guardá el secreto.' : '¿Qué será, pues?' : 'Decí algo a la tropa…'} maxLength={200} value={chat} disabled={chatDisabled} onChange={e => setChat(e.target.value)} /><button aria-label="Enviar mensaje" disabled={!chat.trim() || chatDisabled}><Send size={18} /></button></form><p className="chat-tip">{room.phase === 'drawing' ? 'Escribí la palabra aquí para adivinar.' : 'Se permiten chistes malos. Dibujos también.'}</p>
+          <form className="chat-form" onFocusCapture={() => setChatFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setChatFocused(false); }} onSubmit={event => { event.preventDefault(); event.currentTarget.querySelector('input')?.focus(); if (chat.trim()) emit('chat:send', { text: chat }, () => setChat('')); }}><label className="sr-only" htmlFor="guess">Tu respuesta o mensaje</label><input id="guess" autoComplete="off" placeholder={room.phase === 'drawing' ? isDrawer || player?.guessed ? '¡Shhh! Guardá el secreto.' : '¿Qué será, pues?' : 'Decí algo a la tropa…'} maxLength={200} value={chat} disabled={chatDisabled} onChange={e => setChat(e.target.value)} /><button aria-label="Enviar mensaje" disabled={!chat.trim() || chatDisabled}><Send size={18} /></button></form><p className="chat-tip">{room.phase === 'drawing' ? 'Escribí la palabra aquí para adivinar.' : 'Se permiten chistes malos. Dibujos también.'}</p>
         </aside>
       </div>
     </main>}

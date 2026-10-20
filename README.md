@@ -24,6 +24,7 @@ Juego web de dibujar y adivinar para la tropa. Inspirado en la mecánica de Pint
 - Reportar al pintor es una broma: avisa a la sala y reproduce Steve a quienes tengan sonidos activos. Un reporte por jugador y turno, con 3 segundos entre reportes de la sala. Cuando todos los demás jugadores presentes lo reportan, suena Roblox una sola vez. No cambia los puntos, no termina el turno y no expulsa. En partidas de dos personas basta el reporte del único adivinador. Escribir la respuesta en el lienzo se rechaza sin reproducir efectos.
 - El anfitrión puede silenciar o habilitar el chat de otros jugadores, borrar mensajes y expulsar con confirmación. Silenciar no impide enviar un acierto: solo las respuestas correctas pasan al servidor y puntúan. La expulsión bloquea la misma cuenta y navegador durante la vida de la sala y borra los mensajes públicos de ese apodo.
 - Interfaz adaptable a escritorio y móvil; dibujo con mouse, lápiz o pantalla táctil.
+- En móvil, el chat aparece antes de la clasificación y las herramientas se ocultan a quienes adivinan durante la partida. El lienzo se adapta al espacio visible al escribir; los mensajes nuevos desplazan solo el historial del chat. El teclado virtual debe comprobarse también en dispositivos reales.
 
 ## Stack y arquitectura
 
