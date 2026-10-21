@@ -114,6 +114,53 @@ test('partida completa: alterna dibujantes, finaliza, persiste resultados y admi
   } finally { await f.close(); }
 });
 
+test('palabras de sesión: revanchas, últimas opciones, variantes y reciclaje por categoría', async () => {
+  const f = await fixture({ choice: 30000, reveal: 30, turn: 30 });
+  try {
+    const insert = f.app.store.db.prepare('INSERT INTO words(category, text) VALUES (?, ?)');
+    for (const word of ['árbol', 'ARBOL', 'nube', 'gato', 'casa', 'sol']) insert.run('Sesión A', word);
+    for (const word of ['luna', 'lago', 'flor']) insert.run('Sesión B', word);
+    const host = await f.connect(); const guest = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Uno' });
+    await f.emit(guest, 'room:join', { name: 'Dos', code: f.state(host).code });
+    async function match(category: string, inspect: (choices: string[]) => void) {
+      assert.equal((await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: [category] })).ok, true);
+      assert.equal((await f.emit(host, 'game:start')).ok, true);
+      for (const drawer of [host, guest]) {
+        const state = await f.wait(drawer, state => state.phase === 'choosing' && state.drawer === drawer.id);
+        const choices = state.choices!;
+        assert.equal(new Set(choices.map(normalize)).size, choices.length);
+        inspect(choices);
+        assert.equal((await f.emit(drawer, 'game:choose', { word: choices[0] })).ok, true);
+      }
+      await f.wait(host, state => state.phase === 'finished');
+    }
+    const seen = new Set<string>(); let turn = 0; let lastA = '';
+    for (let game = 0; game < 3; game++) await match('Sesión A', choices => {
+      if (turn < 5) {
+        assert.equal(choices.length, Math.min(3, 5 - turn));
+        assert.ok(choices.every(word => !seen.has(normalize(word))));
+      } else {
+        assert.equal(choices.length, 3);
+        assert.ok(choices.every(word => normalize(word) !== lastA));
+      }
+      lastA = normalize(choices[0]); seen.add(lastA); turn++;
+    });
+    assert.equal(seen.size, 5);
+    const seenB = new Set<string>(); let turnB = 0;
+    for (let game = 0; game < 2; game++) await match('Sesión B', choices => {
+      if (turnB < 3) {
+        assert.equal(choices.length, 3 - turnB);
+        assert.ok(choices.every(word => !seenB.has(normalize(word))));
+      }
+      seenB.add(normalize(choices[0])); turnB++;
+    });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Sesión A'] });
+    await f.emit(host, 'game:start');
+    assert.ok(f.state(host).choices!.every(word => normalize(word) !== lastA), 'Reciclar B conserva el historial de A.');
+  } finally { await f.close(); }
+});
+
 test('desconexiones: transfiere anfitrión, vuelve al lobby y limpia la sala vacía', async () => {
   const f = await fixture();
   try {

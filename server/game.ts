@@ -86,6 +86,7 @@ export class Game {
   }
   private next(room: Room) {
     this.clearTimers(room);
+    const previousWord = normalize(room.word);
     if (room.players.length < 2) { this.reset(room); return; }
     let next: string | undefined;
     while (room.turn < room.queue.length) {
@@ -105,8 +106,14 @@ export class Game {
     room.reporters.clear(); room.lastReportAt = 0; room.penaltyPlayed = false;
     room.players.forEach(player => { player.guessed = false; });
     const allWords = [...this.store.words(room.settings.categories), ...(room.settings.categories.includes('Personalizadas') ? room.customWords : [])];
-    let pool = [...new Set(allWords)].filter(word => !room.used.has(normalize(word)));
-    if (pool.length < 3) { room.used.clear(); pool = [...new Set(allWords)]; }
+    const uniqueWords = new Map(allWords.map(word => [normalize(word), word]));
+    let pool = [...uniqueWords.values()].filter(word => !room.used.has(normalize(word)));
+    if (!pool.length) {
+      // Recycle only the exhausted selection, keeping other categories' history.
+      for (const word of uniqueWords.keys()) room.used.delete(word);
+      pool = [...uniqueWords.values()].filter(word => normalize(word) !== previousWord);
+      if (!pool.length) pool = [...uniqueWords.values()];
+    }
     // Fisher–Yates rather than a biased random sort.
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -263,7 +270,7 @@ export class Game {
       if (new Set(words.map(normalize)).size < 3) throw new Error('Elige categorías con al menos tres palabras.');
       room!.players.forEach(player => { player.score = 0; player.guessed = false; });
       room!.queue = Array.from({ length: room!.settings.rounds }, () => room!.players.map(player => player.id)).flat();
-      room!.turn = 0; room!.used.clear(); this.next(room!);
+      room!.turn = 0; this.next(room!);
     });
     handle('game:choose', z.object({ word: z.string().max(40) }), ({ word }, room) => {
       if (room!.drawer !== socket.id || room!.phase !== 'choosing' || !room!.choices.includes(word)) throw new Error('No puedes elegir esa palabra.');

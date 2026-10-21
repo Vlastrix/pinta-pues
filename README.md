@@ -7,7 +7,8 @@ Juego web de dibujar y adivinar para la tropa. Inspirado en la mecánica de Pint
 - Salas privadas por código o enlace, con 2 a 12 jugadores. Puedes jugar como invitado o crear una cuenta opcional con correo y contraseña.
 - Avatar elegible junto al apodo: robots de DiceBear, opciones nuevas al azar y elección guardada en el navegador. Se comparte con todos los jugadores de la sala.
 - Anfitrión que configura entre 1 y 5 rondas, tiempo por turno y categorías.
-- Cada jugador dibuja una vez por ronda. Elige entre tres palabras; si no elige en 15 segundos, se selecciona una automáticamente.
+- Cada jugador dibuja una vez por ronda. Elige entre hasta tres palabras; si no elige en 15 segundos, se selecciona una automáticamente.
+- Las palabras dibujadas no se repiten en la misma sala, incluidas las revanchas, mientras queden palabras nuevas en las categorías seleccionadas. Si quedan una o dos, se ofrecen esas; al agotarse la selección se reutiliza, evitando la palabra inmediatamente anterior cuando sea posible. Las opciones descartadas pueden volver a aparecer. El historial se pierde cuando se elimina la sala o se reinicia el servidor.
 - Dibujo y chat sincronizados con Socket.IO.
 - Los trazos locales permanecen visibles mientras el servidor los confirma, para evitar parpadeos con conexiones lentas. Las reconstrucciones del lienzo se preparan fuera de pantalla y se muestran completas.
 - Para los espectadores, el primer punto se envía al apoyar el pincel y los tramos siguientes se envían cada 24 ms, incluso si el mouse hace una pausa. Las actualizaciones recibidas se agrupan por frame y se pintan solo los tramos nuevos.
