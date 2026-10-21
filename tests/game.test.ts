@@ -61,6 +61,38 @@ test('easter eggs: protocolo respeta silencio y frecuencia; tercera revancha cue
   } finally { await f.close(); }
 });
 
+test('nuevos easter eggs: sincronizados, aislados, limitados y sin impedir aciertos', async t => {
+  const f = await fixture();
+  try {
+    const host = await f.connect(); const guest = await f.connect(); const outsider = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Host' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { name: 'Amigo', code });
+    await f.emit(outsider, 'room:create', { name: 'Otra sala' });
+    await f.emit(guest, 'chat:send', { text: 'Error de capa 8' });
+    await f.wait(host, state => state.messages.some(message => message.text === 'Se detectó un problema entre la silla y la pantalla'));
+    assert.ok(!f.state(outsider).messages.some(message => message.text.includes('Se detectó')));
+    assert.equal((await f.emit(guest, 'chat:send', { text: '/momazos' })).ok, false);
+    await f.emit(host, 'chat:send', { text: '/momazos' });
+    await f.wait(guest, state => state.messages.some(message => message.text.startsWith('Momazos Diego · ')));
+    assert.ok(!f.state(outsider).messages.some(message => message.text.startsWith('Momazos Diego')));
+    await f.emit(host, 'room:moderate', { target: guest.id, action: 'mute' });
+    await new Promise(resolve => setTimeout(resolve, 360));
+    assert.equal((await f.emit(guest, 'chat:send', { text: '/momazos' })).ok, false);
+    await f.emit(host, 'room:words', { words: ['error de capa 8', 'salteña', 'árbol'] });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 100, categories: ['Personalizadas'] });
+    t.mock.method(Math, 'random', () => 0);
+    const flavor = once(guest, 'game:flavor');
+    await f.emit(host, 'game:start');
+    assert.equal((await flavor)[0], 'Compilando talento… no se encontraron dependencias');
+    assert.equal(f.state(host).phase, 'choosing');
+    await f.emit(host, 'game:choose', { word: 'error de capa 8' });
+    await new Promise(resolve => setTimeout(resolve, 360));
+    assert.equal((await f.emit(guest, 'chat:send', { text: 'error de capa 8' })).ok, true);
+    assert.equal(f.state(guest).phase, 'reveal');
+    assert.ok(f.state(guest).players.find(player => player.id === guest.id)!.score > 0);
+  } finally { await f.close(); }
+});
+
 test('salas públicas: acceso automático, privacidad, permisos y partida en curso', async () => {
   const f = await fixture();
   try {
@@ -193,9 +225,10 @@ test('sala real: privacidad de la palabra, validación, dibujo y puntos', async 
     await f.wait(guest, state => state.phase === 'drawing');
     assert.equal(f.state(guest).hint, '_______');
     assert.equal(JSON.stringify(f.state(guest)).includes('salteña'), false);
-    const stroke: DrawAction = { id: 'stroke-one', tool: 'brush', size: 6, color: '#292438', points: [{ x: 100, y: 100 }, { x: 200, y: 200 }] };
+    const stroke: DrawAction = { id: 'stroke-one', tool: 'brush', size: 200, color: '#292438', smooth: true, finished: true, points: [{ x: 100, y: 100 }, { x: 200, y: 200 }] };
     assert.equal((await f.emit(guest, 'board:action', stroke)).ok, false);
     assert.equal((await f.emit(host, 'board:action', { ...stroke, points: [{ x: -1, y: 100 }] })).ok, false);
+    assert.equal((await f.emit(host, 'board:action', { ...stroke, size: 201 })).ok, false);
     for (const text of ['', '   ', undefined]) {
       const result = await f.emit(host, 'board:action', { ...stroke, tool: 'text', text });
       assert.equal(result.ok, false);
@@ -205,6 +238,8 @@ test('sala real: privacidad de la palabra, validación, dibujo y puntos', async 
     assert.equal((await f.emit(host, 'board:action', stroke)).ok, true);
     await f.emit(host, 'board:action', { ...stroke, points: [{ x: 200, y: 200 }, { x: 220, y: 210 }] });
     await f.wait(guest, state => state.actions.length === 2);
+    assert.equal(f.state(guest).actions[0].smooth, true);
+    assert.equal(f.state(guest).actions[0].finished, true);
     assert.equal((await f.emit(guest, 'board:clear')).ok, false);
     await f.emit(host, 'board:undo');
     await f.wait(guest, state => state.actions.length === 0);
@@ -586,11 +621,14 @@ test('SQLite conserva catálogo y resultados al reabrir el archivo', () => {
   try {
     const store = new Store(path);
     assert.ok(store.words(['Bolivia']).includes('salteña'));
-    store.saveResult('ABC123', [{ name: 'Vladi', score: 500 }]); store.close();
+    store.db.prepare('INSERT INTO users(id, email, password_hash) VALUES (?, ?, ?)').run('cuenta', 'vladi@example.com', 'hash');
+    store.saveResult('ABC123', [{ name: 'Vladi', score: 500, userId: 'cuenta', badges: ['misunderstood'] }]); store.close();
     const reopened = new Store(path);
     try {
       const result = reopened.db.prepare('SELECT scores FROM results').get() as { scores: string };
       assert.deepEqual(JSON.parse(result.scores), [{ name: 'Vladi', score: 500 }]);
+      assert.equal(reopened.leaderboard()[0].points, 500);
+      assert.deepEqual(reopened.badges('cuenta'), ['misunderstood']);
       assert.equal(reopened.words(['Bolivia']).length, new Set(reopened.words(['Bolivia'])).size);
     } finally { reopened.close(); }
   } finally { rmSync(directory, { recursive: true, force: true }); }

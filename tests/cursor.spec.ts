@@ -20,6 +20,7 @@ test('lápiz del color elegido, animación compartida y coordenadas adaptadas a 
     await expect(page.locator('.pencil-cursor-icon')).toBeVisible();
     await expect(guest.locator('.drawing-cursor')).toHaveCount(1);
     await expect(guest.locator('.drawing-cursor')).toHaveAttribute('data-color', '#292438');
+    for (const target of [page, guest]) await expect(target.locator('.pencil-cursor-icon')).toHaveCSS('animation-name', 'none');
     const normalized = await guest.locator('.drawing-cursor').evaluate(element => {
       const marker = element.getBoundingClientRect(); const board = element.parentElement!.getBoundingClientRect();
       return { x: (marker.left - board.left) / board.width, y: (marker.top - board.top) / board.height };
@@ -33,10 +34,18 @@ test('lápiz del color elegido, animación compartida y coordenadas adaptadas a 
       await expect(target.locator('.drawing-cursor')).toHaveClass(/is-drawing/);
       await expect(target.locator('.pencil-cursor-icon')).toHaveCSS('animation-name', 'pencil-scribble');
     }
+    // Holding the button without moving must stop the wobble for both players.
+    for (const target of [page, guest]) {
+      await expect(target.locator('.pencil-cursor-icon')).toHaveCSS('animation-name', 'none');
+      await expect(target.locator('.drawing-cursor')).not.toHaveClass(/is-drawing/);
+    }
+    await page.mouse.move(box.x + box.width * .3, box.y + box.height * .42);
+    for (const target of [page, guest]) await expect(target.locator('.pencil-cursor-icon')).toHaveCSS('animation-name', 'pencil-scribble');
     await guest.emulateMedia({ reducedMotion: 'reduce' });
     await expect(guest.locator('.pencil-cursor-icon')).toHaveCSS('animation-name', 'none');
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5, { steps: 8 }); await page.mouse.up();
     await expect(guest.locator('.drawing-cursor')).not.toHaveClass(/is-drawing/);
+    await expect(page.locator('.pencil-cursor-icon')).toHaveCSS('animation-name', 'none');
     await expect(page.getByRole('button', { name: 'Deshacer', exact: true })).toBeEnabled();
     await page.mouse.move(0, 0);
     for (const target of [page, guest]) await expect(target.locator('.drawing-cursor')).toHaveCount(0);

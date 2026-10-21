@@ -16,13 +16,16 @@ test('el espectador ve el primer punto y los tramos durante las pausas, antes de
     const canvas = page.getByLabel('Lienzo para dibujar'); const box = (await canvas.boundingBox())!;
     const at = (x: number, y: number) => page.mouse.move(box.x + x / 960 * box.width, box.y + y / 640 * box.height);
     const pixel = (x: number) => guest.getByLabel('Dibujo de la partida').evaluate((canvas: HTMLCanvasElement, x) =>
-      Array.from(canvas.getContext('2d')!.getImageData(x, 100, 1, 1).data), x);
+      Array.from(canvas.getContext('2d')!.getImageData(x * canvas.width / 960, 100 * canvas.height / 640, 1, 1).data), x);
     await at(100, 100); await page.mouse.down();
     // No pointermove or pointerup: the first dot must already be visible remotely.
     await expect.poll(() => pixel(100)).toEqual([41, 36, 56, 255]);
     await at(200, 100);
     // No further movement: the timer must flush the last short segment by itself.
     await expect.poll(() => pixel(150)).toEqual([41, 36, 56, 255]);
+    // The provisional tip reaches the latest sample even before pointerup;
+    // smoothing must not leave the spectator half a sample behind the pencil.
+    await expect.poll(() => pixel(200)).toEqual([41, 36, 56, 255]);
     await guest.getByLabel('Tu respuesta o mensaje').fill('prueba');
     await guest.getByRole('button', { name: 'Enviar mensaje' }).click();
     await expect(guest.getByText('prueba', { exact: true })).toBeVisible();

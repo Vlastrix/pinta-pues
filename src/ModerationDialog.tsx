@@ -19,6 +19,7 @@ export function ModerationDialog({ player, onClose, onAction }: {
   return <dialog ref={dialog} className="moderation-dialog" aria-labelledby="moderation-title" onClose={onClose}>
     <div className="account-heading"><h2 id="moderation-title"><Shield size={19} />{player?.name}</h2><button className="icon-button" aria-label="Cerrar moderación" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
     {confirmKick ? <><p>¿Expulsar a <strong>{player?.name}</strong>? No podrá volver a esta sala con la misma cuenta o navegador.</p><div className="moderation-actions"><button className="button secondary" disabled={busy} onClick={() => setConfirmKick(false)}>Cancelar</button><button className="button danger" disabled={busy} onClick={() => void act('kick')}>Sí, expulsar</button></div></> : <div className="moderation-actions">
+      <p>Silenciar el chat también bloquea sus envíos al soundboard.</p>
       <button className="button secondary" disabled={busy} onClick={() => void act(player?.muted ? 'unmute' : 'mute')}>{player?.muted ? <Volume2 size={17} /> : <VolumeX size={17} />}{player?.muted ? 'Habilitar chat' : 'Silenciar chat'}</button>
       <button className="button danger" disabled={busy} onClick={() => setConfirmKick(true)}><UserRoundX size={17} />Expulsar de la sala</button>
     </div>}

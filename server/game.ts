@@ -1,10 +1,15 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
 import { z } from 'zod';
-import { tools, WIDTH, HEIGHT, DEFAULT_AVATAR, AVATAR_PATTERN, MAX_DRAW_ACTIONS, RECONNECT_GRACE_MS, type DrawAction, type Message, type Player, type RoomView, type Settings } from '../shared/types.js';
+import { tools, WIDTH, HEIGHT, DEFAULT_AVATAR, AVATAR_PATTERN, MAX_DRAW_ACTIONS, MAX_BRUSH_SIZE, RECONNECT_GRACE_MS, type DrawAction, type Message, type Player, type RoomView, type Settings } from '../shared/types.js';
 import { Store, normalize } from './store.js';
 import { hintSteps, maskWord } from './hints.js';
 import { WindowLimiter } from './security.js';
+import type { BadgeId } from '../shared/badges.js';
+import { chatEasterEgg, startEasterEgg } from './easterEggs.js';
+import { SOUNDBOARD_CLIPS, type SoundboardEvent } from '../shared/soundboard.js';
+
+type BadgeStats = { guesses: number; opportunities: number; roundGuesses: number; roundOpportunities: number; fullRound: boolean; silentRound: boolean; misunderstood: boolean };
 
 type Room = {
   code: string; host: string; players: Player[]; phase: RoomView['phase']; settings: Settings;
@@ -14,18 +19,20 @@ type Room = {
   reporters: Set<string>; lastReportAt: number; penaltyPlayed: boolean;
   hint: string; hintTimer?: ReturnType<typeof setTimeout>;
   banned: Set<string>; completedGames: number; visibility: RoomView['visibility'];
+  badgeStats: Map<string, BadgeStats>; turnGuesses: number;
 };
 const nameSchema = z.string().trim().min(2, 'Tu apodo necesita al menos 2 letras.').max(20);
 const avatarSchema = z.string().regex(AVATAR_PATTERN, 'Elige un avatar válido.').default(DEFAULT_AVATAR);
 const pointSchema = z.object({ x: z.number().min(0).max(WIDTH), y: z.number().min(0).max(HEIGHT) });
 const cursorSchema = z.object({
   point: pointSchema, color: z.string().regex(/^#[0-9a-f]{6}$/i),
-  size: z.number().min(1).max(48), tool: z.enum(tools), drawing: z.boolean(),
+  size: z.number().min(1).max(MAX_BRUSH_SIZE), tool: z.enum(tools), drawing: z.boolean(),
 }).nullable();
 const actionSchema = z.object({
   id: z.string().min(1).max(64), tool: z.enum(tools), color: z.string().regex(/^#[0-9a-f]{6}$/i),
   segment: z.number().int().min(0).max(MAX_DRAW_ACTIONS).optional(),
-  size: z.number().min(1).max(48), points: z.array(pointSchema).min(1).max(256),
+  smooth: z.boolean().optional(), finished: z.boolean().optional(),
+  size: z.number().min(1).max(MAX_BRUSH_SIZE), points: z.array(pointSchema).min(1).max(256),
   text: z.string().trim().max(50).optional(),
 });
 const settingsSchema = z.object({
@@ -97,12 +104,16 @@ export class Game {
       if (room.players.some(player => player.id === candidate.id)) { next = candidate; break; }
     }
     if (!next) {
+      this.finishBadgeRound(room);
       room.phase = 'finished'; room.deadline = 0; room.drawer = null;
       room.completedGames++;
-      this.store.saveResult(room.code, room.players.map(({ name, score }) => ({ name, score })));
+      this.store.saveResult(room.code, room.players.map(player => ({ name: player.name, score: player.score, avatar: player.avatar,
+        userId: this.playerSocket(player.id)?.data.userId, badges: this.earnedBadges(room, player) })));
+      for (const player of room.players) player.badges = this.store.badges(this.playerSocket(player.id)?.data.userId);
       this.system(room, '¡Se acabó, pues! ¿Sale la revancha?');
       this.broadcast(room); return;
     }
+    if (room.round > 0 && room.round !== next.round) this.finishBadgeRound(room);
     room.round = next.round;
     room.drawer = next.id; room.phase = 'choosing'; room.word = ''; room.actions = []; room.pointCount = 0;
     room.hint = '';
@@ -126,6 +137,10 @@ export class Game {
     this.broadcast(room);
   }
   private choose(room: Room, word: string) {
+    room.turnGuesses = 0;
+    for (const player of room.players) if (player.id !== room.drawer) {
+      const stats = this.badgeStats(room, player.id); stats.opportunities++; stats.roundOpportunities++;
+    }
     room.word = word; room.used.add(normalize(word)); room.choices = []; room.phase = 'drawing';
     room.hint = maskWord(word);
     const duration = this.timing.turn ?? room.settings.duration * 1000;
@@ -136,6 +151,10 @@ export class Game {
   }
   private reveal(room: Room) {
     if (room.phase !== 'drawing') return;
+    if (!room.penaltyPlayed && Date.now() >= room.deadline && room.turnGuesses === 0 && room.actions.length > 0
+      && room.players.some(player => player.id !== room.drawer && this.playerSocket(player.id)?.connected)) {
+      this.badgeStats(room, room.drawer!).misunderstood = true;
+    }
     room.phase = 'reveal';
     this.system(room, `La palabra era «${room.word}».`);
     this.schedule(room, this.timing.reveal, () => this.next(room));
@@ -160,6 +179,30 @@ export class Game {
     room.players.forEach(player => { player.guessed = false; });
     this.system(room, 'Esperando al menos dos jugadores para empezar.'); this.broadcast(room);
   }
+  private badgeStats(room: Room, id: string): BadgeStats {
+    let stats = room.badgeStats.get(id);
+    if (!stats) {
+      stats = { guesses: 0, opportunities: 0, roundGuesses: 0, roundOpportunities: 0, fullRound: false, silentRound: false, misunderstood: false };
+      room.badgeStats.set(id, stats);
+    }
+    return stats;
+  }
+  private finishBadgeRound(room: Room) {
+    for (const player of room.players) {
+      const stats = this.badgeStats(room, player.id);
+      if (stats.fullRound && stats.roundOpportunities > 0 && stats.roundGuesses === 0) stats.silentRound = true;
+      stats.roundGuesses = 0; stats.roundOpportunities = 0; stats.fullRound = true;
+    }
+  }
+  private earnedBadges(room: Room, player: Player): BadgeId[] {
+    const stats = this.badgeStats(room, player.id); const badges: BadgeId[] = [];
+    if (stats.opportunities > 0 && stats.guesses === 0) badges.push('zero-guesses');
+    if (stats.silentRound) badges.push('silent-round');
+    if (stats.misunderstood) badges.push('misunderstood');
+    const scores = room.players.map(other => other.score);
+    if (stats.opportunities > 0 && player.score === Math.min(...scores) && player.score < Math.max(...scores)) badges.push('last-place');
+    return badges;
+  }
   private leave(socket: Socket) {
     clearTimeout(this.reconnectTimers.get(socket.id)); this.reconnectTimers.delete(socket.id);
     this.disconnectedSockets.delete(socket.id);
@@ -168,6 +211,7 @@ export class Game {
     this.membership.delete(socket.id); socket.leave(room.code);
     const player = room.players.find(player => player.id === socket.id)!;
     room.players = room.players.filter(player => player.id !== socket.id);
+    room.badgeStats.delete(socket.id);
     room.reporters.delete(socket.id);
     if (!room.players.length) { this.clearTimers(room); this.rooms.delete(room.code); return; }
     if (room.host === socket.id) room.host = room.players[0].id;
@@ -219,13 +263,13 @@ export class Game {
       let code: string;
       do { code = randomBytes(4).toString('hex').slice(0, 6).toUpperCase(); } while (this.rooms.has(code));
       const room: Room = {
-        code, host: socket.id, players: [{ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId) }],
+        code, host: socket.id, players: [{ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId), badges: this.store.badges(socket.data.userId) }],
         phase: 'lobby', settings: { rounds: 3, duration: 100, categories: ['Bolivia', 'Cotidianas'] },
         round: 0, drawer: null, deadline: 0, word: '', choices: [], actions: [], messages: [],
         customWords: [], used: new Set(), queue: [], turn: 0, pointCount: 0,
         reporters: new Set(), lastReportAt: 0, penaltyPlayed: false,
         hint: '',
-        banned: new Set(), completedGames: 0, visibility,
+        banned: new Set(), completedGames: 0, visibility, badgeStats: new Map(), turnGuesses: 0,
       };
       this.rooms.set(code, room); this.membership.set(socket.id, code); socket.join(code);
       this.system(room, `${name} creó la sala. ¡Que entre la tropa!`); this.broadcast(room);
@@ -239,7 +283,7 @@ export class Game {
       if (socket.data.userId && room.players.some(player => this.playerSocket(player.id)?.data.userId === socket.data.userId)) throw new Error('Tu cuenta ya está en esta sala.');
       if (room.players.length >= 12) throw new Error('La sala está llena (12 jugadores).');
       if (room.players.some(player => normalize(player.name) === normalize(name))) throw new Error('Ese apodo ya está en la sala.');
-      room.players.push({ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId) });
+      room.players.push({ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId), badges: this.store.badges(socket.data.userId) });
       this.membership.set(socket.id, code); socket.join(code);
       this.system(room, `${name} llegó. ¡Ahora sí!`);
       if (!['lobby', 'finished'].includes(room.phase)) {
@@ -327,7 +371,14 @@ export class Game {
       const words = [...this.store.words(room!.settings.categories), ...(room!.settings.categories.includes('Personalizadas') ? room!.customWords : [])];
       if (new Set(words.map(normalize)).size < 3) throw new Error('Elige categorías con al menos tres palabras.');
       room!.players.forEach(player => { player.score = 0; player.guessed = false; });
+      room!.badgeStats.clear();
+      for (const player of room!.players) this.badgeStats(room!, player.id).fullRound = true;
       if (room!.completedGames === 3) this.system(room!, '¿No que era la última, pues? —La tropa, tres revanchas después.');
+      const flavor = startEasterEgg();
+      if (flavor) {
+        this.system(room!, flavor);
+        this.io.to(room!.code).emit('game:flavor', flavor);
+      }
       room!.queue = Array.from({ length: room!.settings.rounds }, (_, index) => room!.players.map(player => ({ id: player.id, round: index + 1 }))).flat();
       room!.turn = 0; this.next(room!);
     });
@@ -341,14 +392,19 @@ export class Game {
       const player = room!.players.find(player => player.id === socket.id)!;
       if (player.muted && !(room!.phase === 'drawing' && socket.id !== room!.drawer && !player.guessed && normalize(text) === normalize(room!.word))) throw new Error('Tu chat está silenciado. Solo puedes enviar la respuesta correcta.');
       const postMessage = () => {
-        if (text.toLowerCase() === '/protocolo3') this.system(room!, 'BT-7274 · Protocolo 3: proteger a la tropa.');
-        else room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
+        const response = chatEasterEgg(text, room!.phase === 'drawing' ? room!.word : undefined);
+        if (response) {
+          if (/\berror\s+de\s+capa\s*8\b/i.test(text)) room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
+          this.system(room!, response);
+        } else room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
       };
       if (room!.phase === 'drawing') {
         if (Date.now() >= room!.deadline) throw new Error('El tiempo para adivinar terminó.');
         if (room!.drawer === socket.id || player.guessed) throw new Error('Espera al siguiente turno para chatear.');
         if (normalize(text) === normalize(room!.word)) {
           player.guessed = true;
+          room!.turnGuesses++;
+          const stats = this.badgeStats(room!, player.id); stats.guesses++; stats.roundGuesses++;
           const remaining = Math.max(0, room!.deadline - Date.now()) / (room!.settings.duration * 1000);
           player.score += 100 + Math.round(remaining * 400);
           const drawer = room!.players.find(p => p.id === room!.drawer);
@@ -361,6 +417,13 @@ export class Game {
         }
       } else postMessage();
       room!.messages = room!.messages.slice(-80); this.broadcast(room!);
+    });
+    handle('soundboard:play', z.object({ id: z.enum(SOUNDBOARD_CLIPS.map(clip => clip.id)) }), ({ id }, room) => {
+      const player = room!.players.find(player => player.id === socket.id)!;
+      if (player.muted) throw new Error('El anfitrión silenció tu chat y soundboard.');
+      const event: SoundboardEvent = { code: room!.code, id, senderId: socket.id, name: player.name };
+      // Ephemeral audio must not be replayed when a player reconnects.
+      this.io.to(room!.code).volatile.emit('soundboard:play', event);
     });
     handle('game:report', z.object({}), (_, room) => {
       if (room!.phase !== 'drawing' || Date.now() >= room!.deadline) throw new Error('Solo puedes reportar al pintor durante el dibujo.');

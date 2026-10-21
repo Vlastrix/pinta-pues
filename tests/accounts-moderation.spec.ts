@@ -47,10 +47,10 @@ test('el anfitrión borra mensajes, silencia, habilita y expulsa; el invitado no
     await page.getByRole('button', { name: 'Moderar a Caserita' }).click();
     await page.getByRole('button', { name: 'Expulsar de la sala', exact: true }).click();
     await page.getByRole('button', { name: 'Sí, expulsar', exact: true }).click();
-    await expect(guest.getByRole('status')).toContainText('te expulsó');
+    await expect(guest.getByRole('status').filter({ hasText: 'te expulsó' })).toBeVisible();
     await expect(guest.getByRole('button', { name: 'Entrar a la sala', exact: true })).toBeEnabled();
     await guest.goto(`/?sala=${code}`); await guest.getByRole('button', { name: 'Entrar a la sala', exact: true }).click();
-    await expect(guest.getByRole('status')).toContainText('Fuiste expulsado de esta sala.');
+    await expect(guest.getByRole('status').filter({ hasText: 'Fuiste expulsado de esta sala.' })).toBeVisible();
     expect(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   } finally { await context.close(); }
 });

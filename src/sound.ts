@@ -2,10 +2,10 @@ import type { SoundEffect } from '../shared/types';
 
 type Effect = SoundEffect | 'correct' | 'finish';
 const files: Record<Effect, string> = {
-  report: '/audio/steve-old-hurt-sound-effect.mp3',
-  penalty: '/audio/roblox-death-sound-effect.mp3',
-  correct: '/audio/success.mp3',
-  finish: '/audio/success-fanfare-trumpets.mp3',
+  report: '/audio/game/steve-old-hurt-sound-effect.mp3',
+  penalty: '/audio/game/roblox-death-sound-effect.mp3',
+  correct: '/audio/game/success.mp3',
+  finish: '/audio/game/success-fanfare-trumpets.mp3',
 };
 
 /** One context, unlocked by a user click, shared by all MP3 effects. */

@@ -58,14 +58,17 @@ test('atajos: herramientas, deshacer sincronizado y escritura sin interferencias
     await page.keyboard.press('Meta+z');
     await expect(tool('Deshacer')).toBeDisabled();
     await page.keyboard.press('t');
+    await canvas.click({ position: { x: 120, y: 120 } });
     const input = page.getByLabel('Texto para el lienzo');
     await input.fill(''); await input.pressSequentially('pelforst12345678');
     await expect(input).toHaveValue('pelforst12345678');
     await expect(tool('Texto')).toHaveAttribute('aria-pressed', 'true');
-    await canvas.click({ position: { x: 120, y: 120 } });
+    await input.press('Enter');
     await expect(tool('Deshacer')).toBeEnabled();
-    await input.focus(); await input.press('Control+z');
+    await canvas.click({ position: { x: 120, y: 180 } });
+    await input.fill('borrador'); await input.press('Control+z');
     await expect(tool('Deshacer')).toBeEnabled();
+    await input.press('Escape');
     await guest.getByLabel('Tu respuesta o mensaje').fill('');
     await guest.getByLabel('Tu respuesta o mensaje').pressSequentially('pelforst12345678');
     await expect(guest.getByLabel('Tu respuesta o mensaje')).toHaveValue('pelforst12345678');
@@ -107,26 +110,27 @@ test('partida entre dos navegadores: sala, figuras, texto protegido, relleno y a
     })).toBeGreaterThan(100);
     await page.getByRole('button', { name: 'Texto', exact: true }).click();
     await canvas.click({ position: { x: 180, y: 70 } });
-    await expect(page.getByRole('status')).toContainText('Primero escribí una pista');
     await expect(page.getByLabel('Texto para el lienzo')).toBeFocused();
     await page.getByLabel('Texto para el lienzo').fill('   ');
+    await page.getByLabel('Texto para el lienzo').press('Enter');
+    await expect(page.getByLabel('Texto para el lienzo')).toHaveCount(0);
     await canvas.click({ position: { x: 180, y: 70 } });
-    await expect(page.getByRole('status')).toContainText('Primero escribí una pista');
-    await expect(page.getByLabel('Texto para el lienzo')).toBeFocused();
     await page.getByLabel('Texto para el lienzo').fill('PRUEBA');
-    await canvas.click({ position: { x: 180, y: 70 } });
+    await page.getByLabel('Texto para el lienzo').press('Enter');
     // A valid text must reach the other player, and undo must remove it again.
     const textRegion = () => viewer.evaluate((canvas: HTMLCanvasElement) => {
       const rect = canvas.getBoundingClientRect();
       const x = Math.floor(180 * canvas.width / rect.width); const y = Math.floor(70 * canvas.height / rect.height);
-      return Array.from(canvas.getContext('2d')!.getImageData(x, y - 30, 120, 30).data).filter((value, i) => i % 4 !== 3 && value < 200).length;
+      return Array.from(canvas.getContext('2d')!.getImageData(x, y, 120, 100).data).filter((value, i) => i % 4 !== 3 && value < 200).length;
     });
     await expect.poll(textRegion).toBeGreaterThan(20);
     await page.getByRole('button', { name: 'Deshacer', exact: true }).click();
     await expect.poll(textRegion).toBe(0);
-    await page.getByLabel('Texto para el lienzo').fill(word.toUpperCase().split('').join(' '));
     await canvas.click({ position: { x: 180, y: 70 } });
+    await page.getByLabel('Texto para el lienzo').fill(word.toUpperCase().split('').join(' '));
+    await page.getByLabel('Texto para el lienzo').press('Enter');
     await expect(page.getByRole('status')).toContainText('No escribas la respuesta');
+    await page.getByLabel('Texto para el lienzo').press('Escape');
     await page.getByRole('button', { name: 'Color #ef5350', exact: true }).click();
     await page.getByRole('button', { name: 'Relleno', exact: true }).click();
     await canvas.click({ position: { x: 90, y: 90 } });
@@ -192,8 +196,8 @@ test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', a
     };
   };
   await page.addInitScript(observeAudio);
-  const successResponse = page.waitForResponse(response => response.url().endsWith('/audio/success.mp3'));
-  const fanfareResponse = page.waitForResponse(response => response.url().endsWith('/audio/success-fanfare-trumpets.mp3'));
+  const successResponse = page.waitForResponse(response => response.url().endsWith('/audio/game/success.mp3'));
+  const fanfareResponse = page.waitForResponse(response => response.url().endsWith('/audio/game/success-fanfare-trumpets.mp3'));
   const code = await createRoom(page);
   expect((await successResponse).ok()).toBe(true);
   expect((await fanfareResponse).ok()).toBe(true);
@@ -205,25 +209,30 @@ test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', a
     await guest.goto(`/?sala=${code}`); await guest.getByLabel('¿Cómo te dice la tropa?').fill('Caserita');
     await guest.getByRole('button', { name: 'Entrar a la sala' }).click();
     for (const target of [page, guest]) {
+      await target.getByRole('button', { name: 'Abrir efectos', exact: true }).click();
       await expect(target.getByRole('button', { name: 'Silenciar sonidos' })).toBeEnabled();
       await expect(target.getByLabel('Volumen de efectos')).toHaveValue('35');
     }
     await page.getByLabel('Volumen de efectos').fill('20');
     await expect(page.getByLabel('Volumen de efectos')).toHaveValue('20');
+    for (const target of [page, guest]) await target.getByRole('button', { name: 'Cerrar efectos', exact: true }).click();
     await page.getByRole('button', { name: '¡A pintar, pues!' }).click();
     const choice = page.locator('.word-choices button').first(); const word = (await choice.innerText()).trim(); await choice.click();
     await page.getByRole('button', { name: 'Texto', exact: true }).click();
-    await page.getByLabel('Texto para el lienzo').fill(word);
     await page.getByLabel('Lienzo para dibujar').click({ position: { x: 120, y: 90 } });
+    await page.getByLabel('Texto para el lienzo').fill(word);
+    await page.getByLabel('Texto para el lienzo').press('Enter');
     await expect(page.getByRole('status')).toContainText('No escribas la respuesta');
     expect(await count(page)).toBe(0); expect(await count(guest)).toBe(0);
     await guest.getByRole('button', { name: 'Reportar al pintor', exact: true }).click();
     await expect.poll(() => count(page)).toBe(2); await expect.poll(() => count(guest)).toBe(2);
     await expect(guest.getByRole('button', { name: 'Reportar al pintor', exact: true })).toHaveCount(0);
     await expect(guest.locator('.reveal-banner')).toContainText(word);
+    await page.getByRole('button', { name: 'Abrir efectos', exact: true }).click();
     await page.getByRole('button', { name: 'Silenciar sonidos' }).click();
     await expect(page.getByLabel('Volumen de efectos')).toHaveCount(0);
     expect(await page.evaluate(() => (window as unknown as { observedAudio: { stops: number } }).observedAudio.stops)).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Cerrar efectos', exact: true }).click();
     // El reporte unánime avanza solo; no hace falta adivinar y no concede puntos.
     await expect(guest.locator('.word-strip strong')).toHaveText(word);
     expect(await count(guest)).toBe(2);
@@ -239,8 +248,10 @@ test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', a
     await expect(guest.locator('.winner')).toBeVisible({ timeout: 10000 });
     await expect.poll(() => count(guest)).toBe(4); // Una sola fanfarria al mostrar al ganador.
     expect(await count(page)).toBe(2); // El jugador silenciado tampoco oye el final.
+    await page.getByRole('button', { name: 'Abrir efectos', exact: true }).click();
     await page.getByRole('button', { name: 'Activar sonidos' }).click();
     await expect(page.getByRole('button', { name: 'Silenciar sonidos' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Cerrar efectos', exact: true }).click();
     expect(await count(page)).toBe(2); // Reactivar sonidos no repite la celebración.
     await guest.getByLabel('Tu respuesta o mensaje').fill('gg tropa');
     await guest.getByRole('button', { name: 'Enviar mensaje' }).click();

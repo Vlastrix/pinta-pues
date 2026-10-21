@@ -16,8 +16,9 @@ test('el trazo permanece visible en cada frame con 220 ms de latencia y al resin
     (window as unknown as { drawingObservation: typeof observation }).drawingObservation = observation;
     function sample() {
       const canvases = document.querySelectorAll<HTMLCanvasElement>('.canvas-stack canvas');
-      const base = canvases[0].getContext('2d')!.getImageData(75, 100, 1, 1).data;
-      const preview = canvases[1].getContext('2d')!.getImageData(75, 100, 1, 1).data;
+      const x = 75 * canvases[0].width / 960, y = 100 * canvases[0].height / 640;
+      const base = canvases[0].getContext('2d')!.getImageData(x, y, 1, 1).data;
+      const preview = canvases[1].getContext('2d')!.getImageData(x, y, 1, 1).data;
       const pixel = preview[3] ? preview : base;
       observation.frames++;
       if (pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200) observation.whiteFrames++;
@@ -40,7 +41,7 @@ test('el trazo permanece visible en cada frame con 220 ms de latencia y al resin
   expect(observed.whiteFrames).toBe(0);
   await page.getByRole('button', { name: 'Limpiar prueba' }).click();
   await expect.poll(() => page.getByLabel('Dibujo de la partida').evaluate((canvas: HTMLCanvasElement) =>
-    Array.from(canvas.getContext('2d')!.getImageData(75, 100, 1, 1).data)
+    Array.from(canvas.getContext('2d')!.getImageData(75 * canvas.width / 960, 100 * canvas.height / 640, 1, 1).data)
   )).toEqual([255, 255, 255, 255]);
   await page.getByRole('button', { name: 'Rechazar trazos' }).click();
   await page.mouse.move(rect.x + 50, rect.y + 100); await page.mouse.down();
@@ -48,6 +49,6 @@ test('el trazo permanece visible en cada frame con 220 ms de latencia y al resin
   // A rejected speculative stroke must disappear instead of becoming a permanent ghost.
   await page.waitForTimeout(300);
   expect(await page.getByLabel('Lienzo para dibujar').evaluate((canvas: HTMLCanvasElement) =>
-    canvas.getContext('2d')!.getImageData(75, 100, 1, 1).data[3]
+    canvas.getContext('2d')!.getImageData(75 * canvas.width / 960, 100 * canvas.height / 640, 1, 1).data[3]
   )).toBe(0);
 });

@@ -1,0 +1,52 @@
+import { test, expect } from '@playwright/test';
+
+test('grosor con teclado y rueda solo sobre el lienzo del pintor', async ({ page, browser }) => {
+  await page.goto('/'); await page.getByLabel('¿Cómo te dice la tropa?').fill('Pintor');
+  await page.getByRole('button', { name: '¡Armemos la sala!' }).click();
+  const code = await page.locator('.room-heading h1>span').innerText();
+  const context = await browser.newContext(); const guest = await context.newPage();
+  try {
+    await guest.goto(`/?sala=${code}`); await guest.getByLabel('¿Cómo te dice la tropa?').fill('Amigo');
+    await guest.getByRole('button', { name: 'Entrar a la sala' }).click();
+    await page.getByRole('button', { name: '¡A pintar, pues!' }).click(); await page.locator('.word-choices button').first().click();
+    const canvas = page.getByLabel('Lienzo para dibujar'); const size = page.getByLabel('Grosor del pincel');
+    const increase = page.getByRole('button', { name: 'Aumentar grosor', exact: true });
+    const decrease = page.getByRole('button', { name: 'Reducir grosor', exact: true });
+    await increase.click(); await expect(size).toHaveValue('7');
+    await decrease.click(); await expect(size).toHaveValue('6');
+    await canvas.hover(); await page.keyboard.press('+'); await expect(size).toHaveValue('7');
+    await page.keyboard.press('NumpadAdd'); await expect(size).toHaveValue('8');
+    await page.keyboard.press('NumpadSubtract'); await expect(size).toHaveValue('7');
+    await page.keyboard.press('-'); await expect(size).toHaveValue('6');
+    const scroll = await page.evaluate(() => scrollY);
+    await page.mouse.wheel(0, -100); await expect(size).toHaveValue('7');
+    await page.mouse.wheel(0, 100); await expect(size).toHaveValue('6');
+    expect(await page.evaluate(() => scrollY)).toBe(scroll);
+    await size.fill('200'); await page.locator('.room-heading h1').click(); await canvas.hover();
+    await expect(increase).toBeDisabled();
+    await page.keyboard.press('+'); await page.mouse.wheel(0, -100); await expect(size).toHaveValue('200');
+    await size.fill('2'); await page.locator('.room-heading h1').click(); await canvas.hover();
+    await expect(decrease).toBeDisabled();
+    await page.keyboard.press('-'); await page.mouse.wheel(0, 100); await expect(size).toHaveValue('2');
+    await page.locator('.room-heading h1').hover(); await page.keyboard.press('+'); await page.mouse.wheel(0, -100);
+    await expect(size).toHaveValue('2');
+    await page.getByRole('button', { name: 'Texto', exact: true }).click();
+    await canvas.click({ position: { x: 50, y: 50 } });
+    const text = page.getByLabel('Texto para el lienzo');
+    await text.fill('prueba'); await canvas.hover({ position: { x: 10, y: 10 } }); await page.keyboard.press('+');
+    await page.mouse.wheel(0, -100); await expect(size).toHaveValue('2'); await expect(text).toHaveValue('prueba+');
+    await page.locator('.room-heading h1').click(); await page.getByRole('button', { name: 'Borrador', exact: true }).click();
+    await canvas.hover(); await page.keyboard.press('+'); await expect(size).toHaveValue('3');
+    await size.fill('200'); await page.locator('.room-heading h1').click(); await canvas.hover();
+    const circle = page.locator('.drawing-cursor[data-tool="eraser"]');
+    await expect(circle).toBeVisible();
+    expect((await circle.boundingBox())!.width / (await canvas.boundingBox())!.width).toBeCloseTo(200 / 960, 2);
+    await canvas.click({ position: { x: 100, y: 100 } });
+    await expect(page.getByRole('button', { name: 'Deshacer', exact: true })).toBeEnabled();
+    await expect(guest.locator('.drawing-cursor[data-tool="eraser"]')).toBeVisible();
+    const guestSize = guest.getByLabel('Grosor del pincel');
+    await expect(guest.getByRole('button', { name: 'Aumentar grosor', exact: true })).toBeDisabled();
+    await guest.getByLabel('Lienzo de solo lectura').hover(); await guest.keyboard.press('+');
+    await expect(guestSize).toHaveValue('6');
+  } finally { await context.close(); }
+});

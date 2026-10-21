@@ -9,8 +9,9 @@ import { Store } from './store.js';
 import { Auth } from './auth.js';
 import { clientIp, sameOrigin, WindowLimiter } from './security.js';
 import { RECONNECT_GRACE_MS } from '../shared/types.js';
+import { recoveryMailFromEnv, type RecoveryMail } from './mail.js';
 
-export function createApp(dbPath = process.env.DB_PATH ?? './data/pinta-pues.sqlite', timing?: { choice: number; reveal: number; turn?: number; reconnect?: number }) {
+export function createApp(dbPath = process.env.DB_PATH ?? './data/pinta-pues.sqlite', timing?: { choice: number; reveal: number; turn?: number; reconnect?: number }, recoveryMail: RecoveryMail | null = recoveryMailFromEnv()) {
   const app = express();
   app.disable('x-powered-by');
   const limiter = new WindowLimiter();
@@ -31,7 +32,7 @@ export function createApp(dbPath = process.env.DB_PATH ?? './data/pinta-pues.sql
     allowRequest: (req, callback) => callback(null, sameOrigin(req) && limiter.allow(`connect:${clientIp(req)}`, 60, 60000)),
   });
   const store = new Store(dbPath);
-  const auth = new Auth(store, io);
+  const auth = new Auth(store, io, recoveryMail);
   io.use((socket, next) => {
     if (!sameOrigin(socket.request)) { next(new Error('Origen no permitido.')); return; }
     const ip = clientIp(socket.request);
@@ -59,6 +60,10 @@ export function createApp(dbPath = process.env.DB_PATH ?? './data/pinta-pues.sql
   const game = new Game(io, store, timing);
   app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'Pinta Pues' }));
   app.get('/api/categories', (_req, res) => res.json(store.categories()));
+  app.get('/api/leaderboard', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(store.leaderboard(auth.account(req)?.id));
+  });
   const client = resolve(fileURLToPath(new URL('../client', import.meta.url)));
   if (existsSync(client)) {
     app.use(express.static(client));
@@ -69,6 +74,6 @@ export function createApp(dbPath = process.env.DB_PATH ?? './data/pinta-pues.sql
   });
   return {
     app, http, io, game, store, auth,
-    close: () => new Promise<void>(done => { game.close(); io.close(() => { store.close(); done(); }); }),
+    close: () => new Promise<void>(done => { game.close(); io.close(() => { void auth.close().finally(() => { store.close(); done(); }); }); }),
   };
 }

@@ -1,5 +1,7 @@
+import type { BadgeId } from './badges.js';
 export const WIDTH = 960;
 export const HEIGHT = 640;
+export const MAX_BRUSH_SIZE = 200;
 export const DRAW_INTERVAL_MS = 24;
 export const CURSOR_INTERVAL_MS = 32;
 export const MAX_DRAW_ACTIONS = 8000;
@@ -9,13 +11,15 @@ export type Tool = typeof tools[number];
 export type Point = { x: number; y: number };
 export type DrawingCursor = { point: Point; color: string; size: number; tool: Tool; drawing: boolean };
 export type CursorUpdate = { drawer: string; cursor: DrawingCursor | null };
-export type AccountUser = { id: string; email: string };
+export type AccountUser = { id: string; email: string; name: string | null; avatar: string; badges: BadgeId[] };
+export type LeaderboardEntry = { rank: number; name: string; avatar: string; points: number; games: number; wins: number; isYou: boolean; badges: BadgeId[] };
 export type DrawAction = {
   id: string; segment?: number; tool: Tool; color: string; size: number; points: Point[]; text?: string;
+  smooth?: boolean; finished?: boolean;
 };
 export const DEFAULT_AVATAR = 'pinta-pues-1';
 export const AVATAR_PATTERN = /^[a-z0-9-]{1,48}$/;
-export type Player = { id: string; name: string; avatar: string; score: number; guessed: boolean; muted: boolean; registered: boolean; connected?: boolean };
+export type Player = { id: string; name: string; avatar: string; score: number; guessed: boolean; muted: boolean; registered: boolean; connected?: boolean; badges?: BadgeId[] };
 export type Message = { id: string; name: string; senderId?: string; text: string; kind: 'chat' | 'system' | 'correct' };
 export type Settings = { rounds: number; duration: number; categories: string[] };
 export type Phase = 'lobby' | 'choosing' | 'drawing' | 'reveal' | 'finished';

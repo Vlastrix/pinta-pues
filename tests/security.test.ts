@@ -68,6 +68,134 @@ test('reconexión: el puesto reservado evita duplicar cuentas y expulsar a un de
   } finally { await f.close(); }
 });
 
+test('ranking HTTP: puntos reales al finalizar, identidad del servidor y sin correo público', async () => {
+  const f = await fixture({ choice: 30000, turn: 30000, reveal: 10 });
+  try {
+    const jar = f.jar();
+    const signup = await jar.request('/api/auth/register', { email: 'ranking@example.com', password: 'Mi-clave-ranking-123' });
+    const registered = await f.connect(jar.header()); const guest = await f.connect();
+    await f.emit(guest, 'room:create', { name: 'Invitado', userId: signup.data.user.id });
+    await f.emit(registered, 'room:join', { name: 'Cuenta real', code: f.state(guest).code });
+    await f.emit(guest, 'room:settings', { rounds: 1, duration: 30, categories: ['Bolivia'] });
+    await f.emit(guest, 'game:start');
+    await f.emit(guest, 'game:choose', { word: f.state(guest).choices![0] });
+    await f.emit(registered, 'chat:send', { text: f.state(guest).word, score: 999999 });
+    assert.deepEqual((await jar.request('/api/leaderboard')).data, []);
+    await f.wait(registered, state => state.phase === 'choosing' && Boolean(state.choices));
+    await f.emit(registered, 'game:choose', { word: f.state(registered).choices![0] });
+    await f.emit(guest, 'chat:send', { text: f.state(registered).word });
+    await f.wait(registered, state => state.phase === 'finished');
+    const ranking = await jar.request('/api/leaderboard');
+    assert.equal(ranking.response.status, 200); assert.equal(ranking.response.headers.get('cache-control'), 'no-store');
+    assert.equal(ranking.data.length, 1); assert.equal(ranking.data[0].name, 'Cuenta real');
+    assert.equal(ranking.data[0].points, f.state(registered).players.find(player => player.id === registered.id)!.score);
+    assert.equal(ranking.data[0].games, 1); assert.equal(ranking.data[0].isYou, true);
+    const publicRanking = await (await fetch(`${f.url}/api/leaderboard`)).json();
+    assert.equal(publicRanking[0].isYou, false);
+    assert.ok(!JSON.stringify(publicRanking).includes('ranking@example.com'));
+    assert.ok(!JSON.stringify(publicRanking).includes(signup.data.user.id));
+  } finally { await f.close(); }
+});
+
+test('perfil: validación, identidad autenticada, persistencia entre sesiones y ranking sin perder puntos', async () => {
+  const f = await fixture();
+  try {
+    const jar = f.jar(); const other = f.jar();
+    const signup = await jar.request('/api/auth/register', { email: 'perfil@example.com', password: 'Clave-perfil-12345' });
+    const id = signup.data.user.id;
+    f.app.store.saveResult('ABC123', [{ userId: id, name: 'Antes', score: 500 }]);
+    assert.equal((await other.request('/api/profile', { name: 'Intruso', avatar: 'pinta-pues-1' })).response.status, 401);
+    assert.equal((await jar.request('/api/profile', { name: 'Mal origen', avatar: 'pinta-pues-1' }, 'https://intruso.example')).response.status, 403);
+    for (const body of [{ name: ' ', avatar: 'pinta-pues-1' }, { name: 'a'.repeat(21), avatar: 'pinta-pues-1' }, { name: 'Válido', avatar: '<script>' }]) {
+      assert.equal((await jar.request('/api/profile', body)).response.status, 400);
+    }
+    const saved = await jar.request('/api/profile', { name: '  Vanguard  ', avatar: 'pinta-pues-5', id: 'otro', email: 'otro@example.com' });
+    assert.equal(saved.response.status, 200); assert.equal(saved.data.user.name, 'Vanguard');
+    assert.equal(saved.data.user.id, id); assert.equal(saved.data.user.email, 'perfil@example.com');
+    assert.equal((await jar.request('/api/session')).data.user.avatar, 'pinta-pues-5');
+    const login = await other.request('/api/auth/login', { email: 'perfil@example.com', password: 'Clave-perfil-12345' });
+    assert.equal(login.data.user.name, 'Vanguard'); assert.equal(login.data.user.avatar, 'pinta-pues-5');
+    const ranking = await jar.request('/api/leaderboard');
+    assert.equal(ranking.data[0].name, 'Vanguard'); assert.equal(ranking.data[0].avatar, 'pinta-pues-5'); assert.equal(ranking.data[0].points, 500);
+    f.app.store.saveResult('ABC124', [{ userId: id, name: 'Apodo de sala', avatar: 'pinta-pues-2', score: 100 }]);
+    assert.equal(f.app.store.leaderboard()[0].name, 'Vanguard'); assert.equal(f.app.store.leaderboard()[0].points, 600);
+  } finally { await f.close(); }
+});
+
+test('insignias: hechos reales, sin duplicados, persistentes en cuenta, ranking y al volver a la sala', async () => {
+  const f = await fixture({ choice: 30000, turn: 120, reveal: 10 });
+  try {
+    const jar = f.jar(); const signup = await jar.request('/api/auth/register', { email: 'insignias@example.com', password: 'Clave-insignias-123' });
+    const host = await f.connect(jar.header()); const guest = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Artista', badges: ['last-place'] }); const code = f.state(host).code;
+    assert.deepEqual(f.state(host).players[0].badges, []);
+    await f.emit(guest, 'room:join', { name: 'Invitado', code });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Bolivia'] });
+    await f.emit(host, 'game:start');
+    await f.emit(host, 'game:choose', { word: f.state(host).choices![0] });
+    await f.emit(host, 'board:action', { id: 'arte', tool: 'brush', color: '#7460bf', size: 6, points: [{ x: 10, y: 20 }] });
+    await f.wait(guest, state => state.phase === 'choosing' && Boolean(state.choices));
+    await f.emit(guest, 'game:choose', { word: f.state(guest).choices![0] });
+    await f.wait(host, state => state.phase === 'finished');
+    const earned = ['zero-guesses', 'silent-round', 'misunderstood'];
+    assert.deepEqual((await jar.request('/api/session')).data.user.badges, earned);
+    assert.deepEqual((await jar.request('/api/leaderboard')).data[0].badges, earned);
+    assert.deepEqual(f.state(host).players[0].badges, earned);
+    await f.emit(host, 'game:start');
+    const word = f.state(host).choices![0]; await f.emit(host, 'game:choose', { word });
+    await f.emit(guest, 'chat:send', { text: word });
+    await f.wait(guest, state => state.phase === 'choosing' && Boolean(state.choices));
+    await f.emit(guest, 'game:choose', { word: f.state(guest).choices![0] });
+    await f.wait(host, state => state.phase === 'finished');
+    assert.ok((await jar.request('/api/session')).data.user.badges.includes('last-place'));
+    const rows = f.app.store.db.prepare('SELECT badge_id FROM user_badges WHERE user_id = ?').all(signup.data.user.id);
+    assert.equal(rows.length, 4);
+    await f.emit(host, 'room:leave');
+    await f.emit(host, 'room:join', { name: 'Artista otra vez', code });
+    assert.equal(f.state(host).players.find(player => player.id === host.id)!.badges!.length, 4);
+    assert.deepEqual(f.state(host).players.find(player => player.id === guest.id)!.badges, []);
+  } finally { await f.close(); }
+});
+
+test('insignias: ni lienzos vacíos ni reportes conceden arte incomprendido; partidas interrumpidas no conceden nada', async () => {
+  const f = await fixture({ choice: 30000, turn: 1000, reveal: 10 });
+  try {
+    const jar = f.jar(); await jar.request('/api/auth/register', { email: 'reportes-insignias@example.com', password: 'Clave-insignias-123' });
+    const host = await f.connect(jar.header()); const guest = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Pintor' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { name: 'Amigo', code });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Bolivia'] });
+    await f.emit(host, 'game:start'); await f.emit(host, 'game:choose', { word: f.state(host).choices![0] });
+    await f.emit(guest, 'room:leave');
+    assert.deepEqual((await jar.request('/api/session')).data.user.badges, []);
+    await f.emit(guest, 'room:join', { name: 'Amigo', code });
+    await f.emit(host, 'game:start'); await f.emit(host, 'game:choose', { word: f.state(host).choices![0] });
+    await f.emit(host, 'board:action', { id: 'reportado', tool: 'brush', color: '#7460bf', size: 6, points: [{ x: 10, y: 20 }] });
+    await f.emit(guest, 'game:report');
+    await f.wait(guest, state => state.phase === 'choosing' && Boolean(state.choices));
+    await f.emit(guest, 'game:choose', { word: f.state(guest).choices![0] }); await f.emit(host, 'game:report');
+    await f.wait(host, state => state.phase === 'finished');
+    assert.deepEqual((await jar.request('/api/session')).data.user.badges, ['zero-guesses', 'silent-round']);
+  } finally { await f.close(); }
+});
+
+test('insignias: entrar a mitad de una ronda no concede ronda en blanco', async () => {
+  const f = await fixture({ choice: 30000, turn: 120, reveal: 10 });
+  try {
+    const jar = f.jar(); await jar.request('/api/auth/register', { email: 'tarde-insignias@example.com', password: 'Clave-insignias-123' });
+    const host = await f.connect(); const guest = await f.connect(); const late = await f.connect(jar.header());
+    await f.emit(host, 'room:create', { name: 'Anfitrión' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { name: 'Amigo', code });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Bolivia'] });
+    await f.emit(host, 'game:start'); await f.emit(host, 'game:choose', { word: f.state(host).choices![0] });
+    await f.emit(late, 'room:join', { name: 'Recién llegado', code });
+    await f.wait(guest, state => state.phase === 'choosing' && Boolean(state.choices));
+    await f.emit(guest, 'game:choose', { word: f.state(guest).choices![0] });
+    await f.wait(late, state => state.phase === 'finished');
+    assert.deepEqual((await jar.request('/api/session')).data.user.badges, ['zero-guesses']);
+  } finally { await f.close(); }
+});
+
 test('cuentas opcionales: hash, cookies privadas, sesión persistente e invalidación al salir', async () => {
   const f = await fixture();
   try {

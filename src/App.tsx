@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { io } from 'socket.io-client';
-import { ArrowRight, Check, Circle, Copy, Crown, Eraser, Flag, Heart, LogOut, Minus, MoreHorizontal, PaintBucket, Pencil, Play, Plus, Send, Sparkles, Square, Star, Trash2, Trophy, Type, Undo2, Users, Volume2, VolumeX } from 'lucide-react';
+import { ArrowRight, Check, Circle, Copy, Crown, Eraser, Flag, Heart, LogOut, Minus, MoreHorizontal, PaintBucket, Pencil, Play, Plus, Send, Sparkles, Square, Star, Trash2, Trophy, Type, Undo2, Users } from 'lucide-react';
 import type { AccountUser, CursorUpdate, DrawingCursor, DrawAction, RoomView, Settings, SoundEffect, Tool } from '../shared/types';
-import { AVATAR_PATTERN, DEFAULT_AVATAR } from '../shared/types';
+import { AVATAR_PATTERN, DEFAULT_AVATAR, MAX_BRUSH_SIZE } from '../shared/types';
 import { Canvas } from './Canvas';
+import { BrushSizeControl } from './BrushSizeControl';
 import { SoundPlayer } from './sound';
 import { AvatarImage, AvatarPicker } from './AvatarPicker';
 import { AccountPanel } from './AccountPanel';
@@ -14,6 +15,12 @@ import { Motd } from './Motd';
 import { pickLandingMessages } from './landingMessages';
 import { SaltenaIcon } from './SaltenaIcon';
 import { DonationButton } from './DonationButton';
+import { Leaderboard } from './Leaderboard';
+import { Badges } from './Badges';
+import { Soundboard } from './Soundboard';
+import { EffectsPanel } from './EffectsPanel';
+import { SoundboardPlayer } from './soundboardPlayer';
+import type { SoundboardEvent } from '../shared/soundboard';
 
 const socket = io({ autoConnect: false });
 let sessionRequest: Promise<{ user: AccountUser | null }> | undefined;
@@ -67,14 +74,28 @@ export default function App() {
   const [code, setCode] = useState(() => new URLSearchParams(location.search).get('sala')?.slice(0, 6).toUpperCase() ?? '');
   const [joining, setJoining] = useState(Boolean(code)); const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState(''); const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [tool, setTool] = useState<Tool>('brush'); const [color, setColor] = useState(colors[0]); const [size, setSize] = useState(6); const [text, setText] = useState('');
-  const textInput = useRef<HTMLInputElement>(null);
+  const [tool, setTool] = useState<Tool>('brush'); const [color, setColor] = useState(colors[0]); const [size, setSize] = useState(6);
   const [chat, setChat] = useState(''); const [words, setWords] = useState(''); const [muted, setMuted] = useState(false);
   const [chatFocused, setChatFocused] = useState(false);
   const [volume, setVolume] = useState(0.35); const [loadingAudio, setLoadingAudio] = useState(false);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const bottom = useRef<HTMLDivElement>(null);
   const sounds = useRef<SoundPlayer | null>(null); const previousCorrect = useRef<string | undefined>(undefined);
+  const soundboard = useRef<SoundboardPlayer | null>(null);
+  const [soundboardMuted, setSoundboardMuted] = useState(() => localStorage.getItem('pinta-soundboard-muted') === 'true');
+  const [soundboardVolume, setSoundboardVolume] = useState(() => {
+    const saved = Number(localStorage.getItem('pinta-soundboard-volume') ?? .35);
+    return Number.isFinite(saved) && saved >= 0 && saved <= 1 ? saved : .35;
+  });
+  const [loadingSoundboard, setLoadingSoundboard] = useState(false);
   const previousGame = useRef<{ code: string; phase: RoomView['phase'] } | null>(null);
+  function applyAccount(user: AccountUser | null) {
+    setAccount(user);
+    sessionRequest = Promise.resolve({ user });
+    if (user?.name) {
+      setName(user.name); setAvatar(user.avatar);
+      localStorage.setItem('pinta-name', user.name); localStorage.setItem('pinta-avatar', user.avatar);
+    }
+  }
   async function enableSounds() {
     setLoadingAudio(true);
     try { sounds.current ??= new SoundPlayer(volume); await sounds.current.enable(); setMuted(false); }
@@ -84,6 +105,19 @@ export default function App() {
   async function toggleSounds() {
     if (!muted) { sounds.current?.mute(); setMuted(true); return; }
     await enableSounds();
+  }
+  async function enableSoundboard() {
+    setLoadingSoundboard(true);
+    try {
+      soundboard.current ??= new SoundboardPlayer(soundboardVolume);
+      await soundboard.current.enable(); setSoundboardMuted(false);
+      localStorage.setItem('pinta-soundboard-muted', 'false');
+    } catch { setSoundboardMuted(true); toast('No se pudo activar el soundboard. Intenta otra vez.'); }
+    finally { setLoadingSoundboard(false); }
+  }
+  function toggleSoundboard() {
+    if (soundboardMuted) { void enableSoundboard(); return; }
+    soundboard.current?.mute(); setSoundboardMuted(true); localStorage.setItem('pinta-soundboard-muted', 'true');
   }
   function toast(message: string) { setNotice(message); clearTimeout(noticeTimer.current); noticeTimer.current = setTimeout(() => setNotice(''), 5000); }
   function emit(event: string, payload: unknown, done?: () => void): Promise<boolean> {
@@ -125,11 +159,19 @@ export default function App() {
       }
     };
     const onDisconnect = (reason: string) => {
+      soundboard.current?.stop();
       clearBufferedUpdates(); setRemoteCursor(null); setConnected(false); setPending(false);
       if (['transport close', 'transport error', 'ping timeout'].includes(reason)) return;
       roomOnWire = null; setRoom(null);
     };
-    const onState = (next: RoomView) => { clearBufferedUpdates(); roomOnWire = next; if (next.phase !== 'drawing') setRemoteCursor(null); offset.current = next.serverTime - Date.now(); setRoom(next); setCode(next.code); history.replaceState({}, '', `?sala=${next.code}`); };
+    const onState = (next: RoomView) => {
+      if (roomOnWire && roomOnWire.code !== next.code) soundboard.current?.stop();
+      clearBufferedUpdates(); roomOnWire = next; if (next.phase !== 'drawing') setRemoteCursor(null);
+      offset.current = next.serverTime - Date.now(); setRoom(next); setCode(next.code);
+      const badges = next.players.find(player => player.id === next.you)?.badges ?? [];
+      setAccount(previous => previous && JSON.stringify(previous.badges) !== JSON.stringify(badges) ? { ...previous, badges } : previous);
+      history.replaceState({}, '', `?sala=${next.code}`);
+    };
     const onCursor = (update: CursorUpdate) => { bufferedCursor = update; scheduleFrame(); };
     socket.on('board:cursor', onCursor);
     const onAction = (action: DrawAction) => {
@@ -139,19 +181,25 @@ export default function App() {
     };
     const onHint = (hint: string) => setRoom(previous => previous?.phase === 'drawing' ? { ...previous, hint } : previous);
     socket.on('word:hint', onHint);
-    const onLeft = () => { clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setRoom(null); history.replaceState({}, '', location.pathname); };
+    const onLeft = () => { soundboard.current?.stop(); clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setRoom(null); history.replaceState({}, '', location.pathname); };
     const onKicked = ({ reason }: { reason: string }) => { onLeft(); setModeratingId(null); toast(reason); };
     socket.on('room:kicked', onKicked);
     const onSound = (effect: SoundEffect) => { if (effect === 'report' || effect === 'penalty') void sounds.current?.play(effect).catch(() => toast('No se pudo reproducir el audio.')); };
     socket.on('sound:play', onSound);
+    const onSoundboard = (event: SoundboardEvent) => {
+      if (event.code === roomOnWire?.code) void soundboard.current?.play(event.id).catch(() => toast('No se pudo reproducir el audio del soundboard.'));
+    };
+    socket.on('soundboard:play', onSoundboard);
+    const onFlavor = (message: string) => toast(message);
+    socket.on('game:flavor', onFlavor);
     socket.on('connect', onConnect); socket.on('disconnect', onDisconnect); socket.on('room:state', onState); socket.on('board:action', onAction); socket.on('room:left', onLeft);
     socket.on('connect_error', error => { setConnected(false); toast(error.message); });
     const reconnect = () => { if (!document.hidden && !socket.connected) socket.connect(); };
     document.addEventListener('visibilitychange', reconnect);
     window.addEventListener('online', reconnect);
-    void session().then(data => { if (active) { setAccount(data.user); socket.connect(); } }).catch(() => { if (active) { toast('No se pudo preparar la sesión. Recarga para intentar otra vez.'); } });
+    void session().then(data => { if (active) { applyAccount(data.user); socket.connect(); } }).catch(() => { if (active) { toast('No se pudo preparar la sesión. Recarga para intentar otra vez.'); } });
     const timer = setInterval(() => setNow(Date.now()), 250);
-    return () => { active = false; document.removeEventListener('visibilitychange', reconnect); window.removeEventListener('online', reconnect); clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); sounds.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
+    return () => { active = false; document.removeEventListener('visibilitychange', reconnect); window.removeEventListener('online', reconnect); clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); socket.off('soundboard:play', onSoundboard); socket.off('game:flavor', onFlavor); sounds.current?.mute(); soundboard.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
   }, []);
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -215,6 +263,7 @@ export default function App() {
   function enter(event: FormEvent) {
     event.preventDefault(); setPending(true); localStorage.setItem('pinta-name', name.trim());
     if (!muted) void enableSounds();
+    if (!soundboardMuted) void enableSoundboard();
     emit(joining ? 'room:join' : 'room:create', { name, avatar, ...(joining ? { code } : {}) });
   }
   function enterPublic() {
@@ -222,6 +271,7 @@ export default function App() {
     if (!nickname?.reportValidity()) return;
     setPending(true); localStorage.setItem('pinta-name', name.trim());
     if (!muted) void enableSounds();
+    if (!soundboardMuted) void enableSoundboard();
     void emit('room:quick-join', { name, avatar });
   }
   async function invite() {
@@ -235,12 +285,8 @@ export default function App() {
     if (cursor) socket.volatile.emit('board:cursor', cursor);
     else socket.emit('board:cursor', null);
   }
+  function changeSize(delta: number) { setSize(previous => Math.max(2, Math.min(MAX_BRUSH_SIZE, previous + delta))); }
   function sendAction(action: DrawAction) {
-    if (action.tool === 'text' && !action.text?.trim()) {
-      toast('Primero escribí una pista en el campo de texto; después tocá el lienzo para colocarla.');
-      textInput.current?.focus();
-      return Promise.resolve(false);
-    }
     return emit('board:action', action);
   }
   return <div className={`app-shell${saltenaMode ? ' saltena-mode' : ''}`}>
@@ -256,7 +302,7 @@ export default function App() {
       <Motd />
       <div className="header-right">{!connected && <span className="connection"><i />Conectando…</span>}
         <ThemeToggle />
-        {!room && <AccountPanel user={account} disabled={!connected} onChanged={user => { setAccount(user); socket.disconnect(); socket.connect(); }} />}
+        {!room && <AccountPanel user={account} disabled={!connected} initialName={name} initialAvatar={avatar} onChanged={user => { const identityChanged = account?.id !== user?.id; applyAccount(user); if (identityChanged) { socket.disconnect(); socket.connect(); } }} />}
         {room && <button className="icon-button" title="Salir de la sala" aria-label="Salir de la sala" onClick={() => emit('room:leave', {})}><LogOut size={19} /></button>}
       </div>
     </header>
@@ -276,6 +322,7 @@ export default function App() {
         </form><button className="button secondary public-play" disabled={!connected || pending} onClick={enterPublic}><Users size={17} />Jugar en sala pública</button><div className="entry-note"><Users size={16} /> De 2 a 12 amigos · Gratis · Sin registro</div>
       </div></section>
       <section className="how-it-works"><div><span>01</span><p><strong>Juntá a la tropa</strong>Creá una sala y pasá el enlace.</p></div><div><span>02</span><p><strong>Dibujá lo que te toque</strong>¿Algo filosófico? ¿Goku? Vos podés.</p></div><div><span>03</span><p><strong>Adiviná antes que todos</strong>Más rápido, más puntos. Así de fácil.</p></div></section>
+      <Leaderboard key={account ? `${account.id}:${account.name}:${account.avatar}` : 'guest'} />
     </main> : <main className={`game-page ${chatFocused ? 'chat-focused' : ''}`}>
       <div className={`room-heading ${!editable ? 'active-game-heading' : ''}`}><div><span className="eyebrow">{landingMessages.roomTagline}</span><h1>Sala <span>{room.code}</span></h1></div>
         {!editable && <div className="turn-header">
@@ -287,7 +334,7 @@ export default function App() {
       <div className={`game-grid ${!editable ? 'active-round' : ''} ${drawing ? 'is-drawing' : 'is-guessing'}`}>
         <aside className="players-panel panel"><div className="panel-heading"><Trophy size={17} /><h2>La tropa</h2><span>{room.players.length}</span></div>
           <div className="player-list">{[...room.players].sort((a, b) => b.score - a.score).map((item, index) => <div className={`player ${item.id === room.drawer ? 'active' : ''} ${item.guessed ? 'guessed' : ''}`} key={item.id}>
-            <span className="player-rank">{index + 1}</span><span className="avatar player-avatar"><AvatarImage seed={item.avatar} alt={`Avatar de ${item.name}`} /></span><div><strong>{item.name}{item.id === room.you && <small> (vos)</small>}</strong><span>{item.score} puntos{item.connected === false && ' · Reconectando…'}{item.muted && ' · Chat silenciado'}</span></div><span className="player-indicator">{item.guessed ? <Check size={16} /> : item.id === room.drawer ? <Pencil size={16} /> : item.id === room.host ? <Crown size={16} /> : null}</span>
+            <span className="player-rank">{index + 1}</span><span className="avatar player-avatar"><AvatarImage seed={item.avatar} alt={`Avatar de ${item.name}`} /></span><div><strong>{item.name}{item.id === room.you && <small> (vos)</small>}</strong><span>{item.score} puntos{item.connected === false && ' · Reconectando…'}{item.muted && ' · Chat silenciado'}</span><Badges ids={item.badges} /></div><span className="player-indicator">{item.guessed ? <Check size={16} /> : item.id === room.drawer ? <Pencil size={16} /> : item.id === room.host ? <Crown size={16} /> : null}</span>
             {isHost && item.id !== room.you && <button className="player-menu" aria-label={`Moderar a ${item.name}`} title={`Moderar a ${item.name}`} onClick={() => setModeratingId(item.id)}><MoreHorizontal size={16} /></button>}
           </div>)}</div><div className="players-note">{editable ? 'Pasá el enlace al grupo. Las risas se multiplican.' : `Ronda ${room.round} de ${room.settings.rounds}`}<span>✳</span></div>
         </aside>
@@ -302,7 +349,7 @@ export default function App() {
               {isHost && <details className="custom-words"><summary>+ Agregar las palabras de tu grupo</summary><form onSubmit={event => { event.preventDefault(); const list = words.split(/[,\n]/).map(word => word.trim()).filter(Boolean); emit('room:words', { words: list }, () => { setWords(''); toast('Palabras agregadas a esta sala.'); }); }}><textarea aria-label="Palabras personalizadas" placeholder="Una por línea o separadas por comas. Sí, las jergas también valen." value={words} maxLength={4000} onChange={e => setWords(e.target.value)} required /><button className="button secondary" type="submit">Agregar palabras</button></form><small>Privadas para esta sala; se borran cuando la sala se cierra.</small></details>}
               {isHost ? <button className="button primary start-button" disabled={room.players.length < 2} onClick={() => emit('game:start', {})}><Play size={17} fill="currentColor" />{room.phase === 'finished' ? '¡Sale la revancha!' : '¡A pintar, pues!'}</button> : <div className="waiting-host">El anfitrión decide cuándo arrancamos.</div>}
               {isHost && room.players.length < 2 && <small className="minimum-note">Falta al menos un amigo para empezar.</small>}
-            </div> : <><Canvas actions={room.actions} enabled={drawing} tool={tool} color={color} size={size} text={text} onAction={sendAction}
+            </div> : <><Canvas actions={room.actions} enabled={drawing} tool={tool} color={color} size={size} onAction={sendAction} onSizeChange={changeSize}
               remoteCursor={room.phase === 'drawing' && remoteCursor?.drawer === room.drawer ? remoteCursor.cursor : null} onCursor={sendCursor} />
               {room.phase === 'choosing' && <div className="board-overlay"><span className="choice-icon"><Pencil size={32} /></span><h2>{isDrawer ? '¿Qué vas a dibujar?' : 'Se está cocinando el dibujo…'}</h2><p>{isDrawer ? 'Elegí una. La tropa confía en tu talento.' : 'En un ratito empieza el turno.'}</p>{room.choices && <div className="word-choices">{room.choices.map(word => <button className="button secondary" key={word} onClick={() => emit('game:choose', { word })}>{word}</button>)}</div>}</div>}
               {room.phase === 'reveal' && <div className="reveal-banner">
@@ -313,13 +360,14 @@ export default function App() {
           </div>
           {room.phase === 'drawing' && !isDrawer && <div className="report-row"><button className="report-button" aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} disabled={room.reported} title="Si todos reportan al pintor, se revela la palabra y pasa el turno. Los puntos no cambian." onClick={() => emit('game:report', {})}><Flag size={14} />{room.reported ? 'Pintor reportado' : 'Reportar al pintor'}<span>{room.reportCount}/{room.reportRequired}</span></button></div>}
           <div className={`toolbar panel ${!drawing ? 'disabled-tools' : ''}`}><div className="tools">{toolOptions.map(({ id, label, icon: Icon, shortcuts }) => <button className={`tool-button ${tool === id ? 'selected' : ''}`} title={`${label} (${shortcuts.join(' / ').toUpperCase()})`} aria-label={label} aria-keyshortcuts={shortcuts.join(' ').toUpperCase()} aria-pressed={tool === id} key={id} disabled={!drawing} onClick={() => setTool(id)}><Icon size={19} /></button>)}<span className="tool-divider" /><button className="tool-button" title="Deshacer (Ctrl+Z / ⌘Z)" aria-label="Deshacer" aria-keyshortcuts="Control+Z Meta+Z" disabled={!drawing || !room.actions.length} onClick={() => emit('board:undo', {})}><Undo2 size={18} /></button><button className="tool-button" title="Limpiar lienzo" aria-label="Limpiar lienzo" disabled={!drawing || !room.actions.length} onClick={() => emit('board:clear', {})}><Trash2 size={17} /></button></div>
-            <div className="color-row"><div className="palette">{colors.map(value => <button key={value} aria-label={`Color ${value}`} title={value} disabled={!drawing} className={`swatch ${color === value ? 'selected' : ''}`} style={{ background: value }} onClick={() => setColor(value)} />)}<label className="custom-color" title="Otro color"><Plus size={15} /><input type="color" aria-label="Color personalizado" disabled={!drawing} value={color} onChange={e => setColor(e.target.value)} /></label></div><label className="brush-size">Grosor<input aria-label="Grosor del pincel" type="range" min="2" max="40" disabled={!drawing} value={size} onChange={e => setSize(Number(e.target.value))} /><span>{size}</span></label></div>
-            {tool === 'text' && <input ref={textInput} className="canvas-text" aria-label="Texto para el lienzo" placeholder="Primero escribí acá; después tocá el lienzo para colocarlo." value={text} maxLength={50} disabled={!drawing} onChange={e => setText(e.target.value)} />}
+            <div className="color-row"><div className="palette">{colors.map(value => <button key={value} aria-label={`Color ${value}`} title={value} disabled={!drawing} className={`swatch ${color === value ? 'selected' : ''}`} style={{ background: value }} onClick={() => setColor(value)} />)}<label className="custom-color" title="Otro color"><Plus size={15} /><input type="color" aria-label="Color personalizado" disabled={!drawing} value={color} onChange={e => setColor(e.target.value)} /></label></div><BrushSizeControl size={size} disabled={!drawing} onChange={setSize} /></div>
           </div>
-          <p className="board-caption">{drawing ? tool === 'text' ? 'Escribí el texto arriba y tocá el lienzo para colocarlo.' : 'Tu obra maestra empieza con un trazo.' : 'No hace falta dibujar bien para pasarla bien.'}<Heart size={13} /></p>
+          <p className="board-caption">{drawing ? tool === 'text' ? 'Arrastrá un área y escribí sobre el lienzo. Enter confirma, Shift+Enter agrega una línea y Escape cancela.' : 'Tu obra maestra empieza con un trazo.' : 'No hace falta dibujar bien para pasarla bien.'}<Heart size={13} /></p>
         </section>
-        <aside className="chat-panel panel"><div className="panel-heading"><span className="chat-bubble">···</span><h2>El chisme</h2><button className="icon-button" aria-label={muted ? 'Activar sonidos' : 'Silenciar sonidos'} title={muted ? 'Activar sonidos' : 'Silenciar sonidos'} disabled={loadingAudio} onClick={() => void toggleSounds()}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button></div>
-          {!muted && <label className="sound-volume">Volumen<input aria-label="Volumen de efectos" type="range" min="0" max="100" value={Math.round(volume * 100)} onChange={event => { const value = Number(event.target.value) / 100; setVolume(value); sounds.current?.setVolume(value); }} /></label>}
+        <aside className="chat-panel panel"><div className="panel-heading"><span className="chat-bubble">···</span><h2>El chisme</h2>
+          <div className="chat-audio-controls">
+          <Soundboard muted={soundboardMuted} volume={soundboardVolume} busy={loadingSoundboard} canSend={connected && !player?.muted && !soundboardMuted} onToggle={toggleSoundboard} onVolume={value => { setSoundboardVolume(value); soundboard.current?.setVolume(value); localStorage.setItem('pinta-soundboard-volume', String(value)); }} onSend={async id => { if (soundboardMuted || !connected || player?.muted) return false; await enableSoundboard(); if (localStorage.getItem('pinta-soundboard-muted') === 'true') return false; return emit('soundboard:play', { id }); }} />
+          <EffectsPanel muted={muted} volume={volume} busy={loadingAudio} onToggle={() => void toggleSounds()} onVolume={value => { setVolume(value); sounds.current?.setVolume(value); }} /></div></div>
           <div className="messages" aria-live="polite" aria-label="Chat de la sala"><ChatMessages messages={room.messages} you={room.you} onDelete={isHost ? id => { void emit('chat:delete', { id }); } : undefined} /><div ref={bottom} /></div>
           <form className="chat-form" onFocusCapture={() => setChatFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setChatFocused(false); }} onSubmit={event => { event.preventDefault(); event.currentTarget.querySelector('input')?.focus(); if (chat.trim()) emit('chat:send', { text: chat }, () => setChat('')); }}><label className="sr-only" htmlFor="guess">Tu respuesta o mensaje</label><input id="guess" autoComplete="off" placeholder={room.phase === 'drawing' ? isDrawer || player?.guessed ? '¡Shhh! Guardá el secreto.' : '¿Qué será, pues?' : 'Decí algo a la tropa…'} maxLength={200} value={chat} disabled={chatDisabled} onChange={e => setChat(e.target.value)} /><button aria-label="Enviar mensaje" disabled={!chat.trim() || chatDisabled}><Send size={18} /></button></form><p className="chat-tip">{room.phase === 'drawing' ? 'Escribí la palabra aquí para adivinar.' : 'Se permiten chistes malos. Dibujos también.'}</p>
         </aside>
