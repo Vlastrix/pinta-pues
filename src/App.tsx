@@ -12,6 +12,8 @@ import { ChatMessages } from './ChatMessages';
 import { ThemeToggle } from './ThemeToggle';
 import { Motd } from './Motd';
 import { pickLandingMessages } from './landingMessages';
+import { SaltenaIcon } from './SaltenaIcon';
+import { DonationButton } from './DonationButton';
 
 const socket = io({ autoConnect: false });
 let sessionRequest: Promise<{ user: AccountUser | null }> | undefined;
@@ -50,6 +52,8 @@ function Doodle({ small = false }: { small?: boolean }) {
 
 export default function App() {
   const [landingMessages] = useState(pickLandingMessages);
+  const [saltenaMode, setSaltenaMode] = useState(false);
+  const logoClicks = useRef(0);
   const [room, setRoom] = useState<RoomView | null>(null);
   const [account, setAccount] = useState<AccountUser | null>(null);
   const [moderatingId, setModeratingId] = useState<string | null>(null);
@@ -113,8 +117,18 @@ export default function App() {
         if (cursor) setRemoteCursor(cursor);
       });
     };
-    const onConnect = () => setConnected(true);
-    const onDisconnect = () => { const wasPlaying = Boolean(roomOnWire); clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setConnected(false); setRoom(null); setPending(false); if (wasPlaying) toast('Se cortó la conexión. Vuelve a entrar a la sala cuando se reconecte.'); };
+    const onConnect = () => {
+      setConnected(true);
+      if (roomOnWire && !socket.recovered) {
+        roomOnWire = null; setRoom(null);
+        toast('No se pudo recuperar tu lugar. Vuelve a entrar a la sala.');
+      }
+    };
+    const onDisconnect = (reason: string) => {
+      clearBufferedUpdates(); setRemoteCursor(null); setConnected(false); setPending(false);
+      if (['transport close', 'transport error', 'ping timeout'].includes(reason)) return;
+      roomOnWire = null; setRoom(null);
+    };
     const onState = (next: RoomView) => { clearBufferedUpdates(); roomOnWire = next; if (next.phase !== 'drawing') setRemoteCursor(null); offset.current = next.serverTime - Date.now(); setRoom(next); setCode(next.code); history.replaceState({}, '', `?sala=${next.code}`); };
     const onCursor = (update: CursorUpdate) => { bufferedCursor = update; scheduleFrame(); };
     socket.on('board:cursor', onCursor);
@@ -132,9 +146,12 @@ export default function App() {
     socket.on('sound:play', onSound);
     socket.on('connect', onConnect); socket.on('disconnect', onDisconnect); socket.on('room:state', onState); socket.on('board:action', onAction); socket.on('room:left', onLeft);
     socket.on('connect_error', error => { setConnected(false); toast(error.message); });
+    const reconnect = () => { if (!document.hidden && !socket.connected) socket.connect(); };
+    document.addEventListener('visibilitychange', reconnect);
+    window.addEventListener('online', reconnect);
     void session().then(data => { if (active) { setAccount(data.user); socket.connect(); } }).catch(() => { if (active) { toast('No se pudo preparar la sesión. Recarga para intentar otra vez.'); } });
     const timer = setInterval(() => setNow(Date.now()), 250);
-    return () => { active = false; clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); sounds.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
+    return () => { active = false; document.removeEventListener('visibilitychange', reconnect); window.removeEventListener('online', reconnect); clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); sounds.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
   }, []);
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -171,7 +188,7 @@ export default function App() {
   }, [room?.code, room?.phase, muted]);
   const isHost = room?.host === room?.you;
   const isDrawer = Boolean(room && room.drawer === room.you);
-  const drawing = Boolean(isDrawer && room?.phase === 'drawing');
+  const drawing = Boolean(connected && isDrawer && room?.phase === 'drawing');
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
       if (!drawing || event.defaultPrevented || event.isComposing || event.repeat || document.querySelector('dialog[open]')) return;
@@ -191,7 +208,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', shortcut);
   }, [drawing, room?.actions.length]);
   const player = room?.players.find(player => player.id === room.you);
-  const chatDisabled = Boolean(room && ((room.phase === 'drawing' && (isDrawer || player?.guessed)) || (player?.muted && room.phase !== 'drawing')));
+  const chatDisabled = !connected || Boolean(room && ((room.phase === 'drawing' && (isDrawer || player?.guessed)) || (player?.muted && room.phase !== 'drawing')));
   useEffect(() => { if (chatDisabled) setChatFocused(false); }, [chatDisabled]);
   const editable = Boolean(room && ['lobby', 'finished'].includes(room.phase));
   const seconds = room?.deadline ? Math.max(0, Math.ceil((room.deadline - now - offset.current) / 1000)) : 0;
@@ -199,6 +216,13 @@ export default function App() {
     event.preventDefault(); setPending(true); localStorage.setItem('pinta-name', name.trim());
     if (!muted) void enableSounds();
     emit(joining ? 'room:join' : 'room:create', { name, avatar, ...(joining ? { code } : {}) });
+  }
+  function enterPublic() {
+    const nickname = document.getElementById('nickname') as HTMLInputElement | null;
+    if (!nickname?.reportValidity()) return;
+    setPending(true); localStorage.setItem('pinta-name', name.trim());
+    if (!muted) void enableSounds();
+    void emit('room:quick-join', { name, avatar });
   }
   async function invite() {
     const url = `${location.origin}${location.pathname}?sala=${room!.code}`;
@@ -219,9 +243,16 @@ export default function App() {
     }
     return emit('board:action', action);
   }
-  return <div className="app-shell">
+  return <div className={`app-shell${saltenaMode ? ' saltena-mode' : ''}`}>
     <header className="site-header">
-      <a className="brand" href="/" onClick={event => { if (room) event.preventDefault(); }} aria-label="Pinta Pues inicio"><span className="brand-icon"><Pencil size={24} /></span><span>Pinta<span className="brand-purple">Pues</span><span className="brand-dot">.</span></span></a>
+      <a className="brand" href="/" onClick={event => {
+        event.preventDefault();
+        if (++logoClicks.current === 7) {
+          logoClicks.current = 0;
+          setSaltenaMode(value => !value);
+          toast(saltenaMode ? 'Se acabaron las salteñas. Vuelve el lápiz.' : '¡Modo salteña activado! El talento viene con llajua.');
+        }
+      }} aria-label="Pinta Pues inicio"><span className="brand-icon">{saltenaMode ? <SaltenaIcon /> : <Pencil size={24} />}</span><span>Pinta<span className="brand-purple">Pues</span><span className="brand-dot">.</span></span></a>
       <Motd />
       <div className="header-right">{!connected && <span className="connection"><i />Conectando…</span>}
         <ThemeToggle />
@@ -229,6 +260,7 @@ export default function App() {
         {room && <button className="icon-button" title="Salir de la sala" aria-label="Salir de la sala" onClick={() => emit('room:leave', {})}><LogOut size={19} /></button>}
       </div>
     </header>
+    {room && !connected && <p className="reconnecting-notice" role="status">Reconectando… Guardamos tu lugar durante 2 minutos. La partida sigue en curso.</p>}
     {!room ? <main className="landing">
       <section className="hero-copy">
         <h1>{landingMessages.hero.firstLine}<br />{landingMessages.hero.secondLine}<span>{landingMessages.hero.highlight}<svg viewBox="0 0 300 16" aria-hidden="true"><path d="M3 10Q100 0 295 9M22 15q141-7 245-1" /></svg></span></h1>
@@ -238,10 +270,10 @@ export default function App() {
       <section className="entry-wrap"><span className="sticker">¡Ya pues, entrá! <Sparkles size={18} /></span><div className="entry-card">
         <h2>{landingMessages.title}<span>✳</span></h2><p>{landingMessages.subtitle}</p>
         <form onSubmit={enter}><label htmlFor="nickname">¿Cómo te dice la tropa?</label><div className="input-with-icon"><AvatarPicker value={avatar} onChange={seed => { setAvatar(seed); localStorage.setItem('pinta-avatar', seed); }} /><input id="nickname" autoComplete="nickname" placeholder="Tu apodo legendario" value={name} minLength={2} maxLength={20} required onChange={event => setName(event.target.value)} /></div>
-          <div className="entry-tabs"><button type="button" className={!joining ? 'selected' : ''} onClick={() => setJoining(false)}><Plus size={17} /> Crear sala</button><button type="button" className={joining ? 'selected' : ''} onClick={() => setJoining(true)}><Users size={17} /> Unirme</button></div>
+          <div className="entry-tabs"><button type="button" className={!joining ? 'selected' : ''} onClick={() => setJoining(false)}><Plus size={17} /> Crear privada</button><button type="button" className={joining ? 'selected' : ''} onClick={() => setJoining(true)}><Users size={17} /> Unirme</button></div>
           {joining && <div className="code-field"><label htmlFor="code">Código de la sala</label><input id="code" value={code} placeholder="Ej. A1B2C3" maxLength={6} minLength={6} required onChange={event => setCode(event.target.value.toUpperCase())} /></div>}
           <button className="button primary entry-submit" disabled={!connected || pending}>{pending ? 'Un ratito…' : joining ? 'Entrar a la sala' : '¡Armemos la sala!'}<ArrowRight size={19} /></button>
-        </form><div className="entry-note"><Users size={16} /> De 2 a 12 amigos · Gratis · Sin registro</div>
+        </form><button className="button secondary public-play" disabled={!connected || pending} onClick={enterPublic}><Users size={17} />Jugar en sala pública</button><div className="entry-note"><Users size={16} /> De 2 a 12 amigos · Gratis · Sin registro</div>
       </div></section>
       <section className="how-it-works"><div><span>01</span><p><strong>Juntá a la tropa</strong>Creá una sala y pasá el enlace.</p></div><div><span>02</span><p><strong>Dibujá lo que te toque</strong>¿Algo filosófico? ¿Goku? Vos podés.</p></div><div><span>03</span><p><strong>Adiviná antes que todos</strong>Más rápido, más puntos. Así de fácil.</p></div></section>
     </main> : <main className={`game-page ${chatFocused ? 'chat-focused' : ''}`}>
@@ -255,7 +287,7 @@ export default function App() {
       <div className={`game-grid ${!editable ? 'active-round' : ''} ${drawing ? 'is-drawing' : 'is-guessing'}`}>
         <aside className="players-panel panel"><div className="panel-heading"><Trophy size={17} /><h2>La tropa</h2><span>{room.players.length}</span></div>
           <div className="player-list">{[...room.players].sort((a, b) => b.score - a.score).map((item, index) => <div className={`player ${item.id === room.drawer ? 'active' : ''} ${item.guessed ? 'guessed' : ''}`} key={item.id}>
-            <span className="player-rank">{index + 1}</span><span className="avatar player-avatar"><AvatarImage seed={item.avatar} alt={`Avatar de ${item.name}`} /></span><div><strong>{item.name}{item.id === room.you && <small> (vos)</small>}</strong><span>{item.score} puntos{item.muted && ' · Chat silenciado'}</span></div><span className="player-indicator">{item.guessed ? <Check size={16} /> : item.id === room.drawer ? <Pencil size={16} /> : item.id === room.host ? <Crown size={16} /> : null}</span>
+            <span className="player-rank">{index + 1}</span><span className="avatar player-avatar"><AvatarImage seed={item.avatar} alt={`Avatar de ${item.name}`} /></span><div><strong>{item.name}{item.id === room.you && <small> (vos)</small>}</strong><span>{item.score} puntos{item.connected === false && ' · Reconectando…'}{item.muted && ' · Chat silenciado'}</span></div><span className="player-indicator">{item.guessed ? <Check size={16} /> : item.id === room.drawer ? <Pencil size={16} /> : item.id === room.host ? <Crown size={16} /> : null}</span>
             {isHost && item.id !== room.you && <button className="player-menu" aria-label={`Moderar a ${item.name}`} title={`Moderar a ${item.name}`} onClick={() => setModeratingId(item.id)}><MoreHorizontal size={16} /></button>}
           </div>)}</div><div className="players-note">{editable ? 'Pasá el enlace al grupo. Las risas se multiplican.' : `Ronda ${room.round} de ${room.settings.rounds}`}<span>✳</span></div>
         </aside>
@@ -264,6 +296,7 @@ export default function App() {
           <div className="board-surface">
             {editable ? <div className="lobby">
               {room.phase === 'finished' ? <div className="winner"><Trophy size={42} /><h2>¡{[...room.players].sort((a, b) => b.score - a.score)[0].name} se la lleva!</h2><p>Los puntos están a la izquierda. Las excusas van al chat.</p></div> : <><div className="lobby-doodle"><Doodle small /></div><h2>Que no falte nadie, pues.</h2><p>Comparte este enlace <button className="inline-code" onClick={invite}>{room.code} <Copy size={13} /></button> y prepará tu mejor peor dibujo.</p></>}
+              <label className="room-visibility">Visibilidad<select aria-label="Visibilidad de la sala" disabled={!isHost} value={room.visibility} onChange={event => emit('room:visibility', { visibility: event.target.value })}><option value="private">Privada · Solo con código o enlace</option><option value="public">Pública · Cualquiera puede unirse</option></select></label>
               <div className="settings-grid"><label>Rondas<select aria-label="Rondas" disabled={!isHost} value={room.settings.rounds} onChange={e => settings({ rounds: Number(e.target.value) })}>{[1, 2, 3, 4, 5].map(value => <option key={value} value={value}>{value} {value === 1 ? 'ronda' : 'rondas'}</option>)}</select></label><label>Tiempo por turno<select aria-label="Tiempo por turno" disabled={!isHost} value={room.settings.duration} onChange={e => settings({ duration: Number(e.target.value) })}>{[30, 60, 80, 100, 120, 180].map(value => <option key={value} value={value}>{value} segundos</option>)}</select></label></div>
               <div className="category-picker"><span>Categorías de la partida</span><div>{room.availableCategories.map(category => <button key={category} className={room.settings.categories.includes(category) ? 'selected' : ''} disabled={!isHost} onClick={() => { const categories = room.settings.categories.includes(category) ? room.settings.categories.filter(value => value !== category) : [...room.settings.categories, category]; if (categories.length) settings({ categories }); }} >{room.settings.categories.includes(category) && <Check size={13} />}{category}{category === 'Personalizadas' ? ` (${room.customWordCount})` : ''}</button>)}</div></div>
               {isHost && <details className="custom-words"><summary>+ Agregar las palabras de tu grupo</summary><form onSubmit={event => { event.preventDefault(); const list = words.split(/[,\n]/).map(word => word.trim()).filter(Boolean); emit('room:words', { words: list }, () => { setWords(''); toast('Palabras agregadas a esta sala.'); }); }}><textarea aria-label="Palabras personalizadas" placeholder="Una por línea o separadas por comas. Sí, las jergas también valen." value={words} maxLength={4000} onChange={e => setWords(e.target.value)} required /><button className="button secondary" type="submit">Agregar palabras</button></form><small>Privadas para esta sala; se borran cuando la sala se cierra.</small></details>}
@@ -293,7 +326,7 @@ export default function App() {
       </div>
     </main>}
     <ModerationDialog player={isHost ? room?.players.find(player => player.id === moderatingId) ?? null : null} onClose={() => setModeratingId(null)} onAction={(target, action) => emit('room:moderate', { target, action })} />
-    <footer className="site-footer"><span>Pinta Pues <span className="footer-spark">✳</span> Con cariño, desde Bolivia. <span className="flag footer-flag" role="img" aria-label="Bandera de Bolivia" /></span><small>© {new Date().getFullYear()} Vanguard &amp; TheOutBounded</small></footer>
+    <footer className="site-footer"><div className="footer-main"><span>Pinta Pues <span className="footer-spark">✳</span> Con cariño, desde Bolivia. <span className="flag footer-flag" role="img" aria-label="Bandera de Bolivia" /></span><span className="footer-support"><span className="footer-spark" aria-hidden="true">✳</span><DonationButton /></span></div><small>© {new Date().getFullYear()} Vanguard &amp; TheOutBounded</small></footer>
     {notice && <div className="toast" role="status">{notice}<button aria-label="Cerrar aviso" onClick={() => setNotice('')}>×</button></div>}
   </div>;
 }

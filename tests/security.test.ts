@@ -47,6 +47,27 @@ async function fixture(timing?: { choice: number; reveal: number; turn?: number 
   return { app, url, jar, connect, emit, wait, state: (socket: Socket) => states.get(socket)!, close: async () => { sockets.forEach(socket => socket.disconnect()); await app.close(); } };
 }
 
+test('reconexión: el puesto reservado evita duplicar cuentas y expulsar a un desconectado cancela su regreso', async () => {
+  const f = await fixture();
+  try {
+    const jar = f.jar();
+    await jar.request('/api/auth/register', { email: 'movil@example.com', password: 'Clave-movil-12345' });
+    const host = await f.connect(); const guest = await f.connect(jar.header());
+    await f.emit(host, 'room:create', { name: 'Anfitrión' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { name: 'Móvil', code });
+    const oldId = guest.id!;
+    guest.io.reconnection(false); guest.io.engine.close();
+    await f.wait(host, state => state.players.some(player => player.id === oldId && !player.connected));
+    const duplicate = await f.connect(jar.header());
+    assert.equal((await f.emit(duplicate, 'room:join', { name: 'Otra pestaña', code })).ok, false);
+    assert.equal((await f.emit(host, 'room:moderate', { target: oldId, action: 'kick' })).ok, true);
+    const reconnected = once(guest, 'connect'); guest.connect(); await reconnected;
+    assert.equal(f.app.game.membership.has(guest.id!), false);
+    assert.equal(f.app.io.sockets.sockets.get(guest.id!)!.rooms.has(code), false);
+    assert.equal((await f.emit(guest, 'room:join', { name: 'Móvil', code })).ok, false);
+  } finally { await f.close(); }
+});
+
 test('cuentas opcionales: hash, cookies privadas, sesión persistente e invalidación al salir', async () => {
   const f = await fixture();
   try {

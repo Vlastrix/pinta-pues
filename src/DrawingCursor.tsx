@@ -1,5 +1,6 @@
 import { Crosshair, PaintBucket, Type } from 'lucide-react';
 import { WIDTH, HEIGHT, type DrawingCursor as Cursor } from '../shared/types';
+import { SaltenaIcon } from './SaltenaIcon';
 
 export function DrawingCursor({ cursor }: { cursor: Cursor }) {
   const Icon = cursor.tool === 'fill' ? PaintBucket : cursor.tool === 'text' ? Type : Crosshair;
@@ -9,6 +10,7 @@ export function DrawingCursor({ cursor }: { cursor: Cursor }) {
       ...(cursor.tool === 'eraser' ? { width: `${cursor.size / WIDTH * 100}%`, height: `${cursor.size / HEIGHT * 100}%` } : {}) }}>
     {cursor.tool === 'eraser' ? null : cursor.tool === 'brush' ? <>
       {cursor.drawing && <span className="pencil-contact" />}
+      <SaltenaIcon className="saltena-cursor-icon" />
       <svg className="pencil-cursor-icon" viewBox="0 0 48 48" width="40" height="40" fill="none" stroke="#302b3c" strokeWidth="1.8" strokeLinejoin="round">
         <path d="M7 40 11 27 32 6 42 16 21 37Z" fill={cursor.color} />
         <path d="M7 40 11 27 21 37Z" fill="#f0d0a4" />

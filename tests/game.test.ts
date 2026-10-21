@@ -9,7 +9,7 @@ import { createApp } from '../server/app.js';
 import { normalize, Store } from '../server/store.js';
 import type { RoomView, DrawAction } from '../shared/types.js';
 
-async function fixture(timing = { choice: 30000, reveal: 30, turn: 30000 }) {
+async function fixture(timing: { choice: number; reveal: number; turn?: number; reconnect?: number } = { choice: 30000, reveal: 30, turn: 30000 }) {
   const app = createApp(':memory:', timing);
   app.http.listen(0, '127.0.0.1'); await once(app.http, 'listening');
   const address = app.http.address();
@@ -36,6 +36,139 @@ async function fixture(timing = { choice: 30000, reveal: 30, turn: 30000 }) {
   }
   return { app, connect, emit, wait, state: (socket: Socket) => states.get(socket)!, close: async () => { sockets.forEach(socket => socket.disconnect()); await app.close(); } };
 }
+
+test('easter eggs: protocolo respeta silencio y frecuencia; tercera revancha cuenta partidas terminadas', async () => {
+  const f = await fixture({ choice: 100, turn: 20, reveal: 5 });
+  try {
+    const host = await f.connect(); const guest = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Vanguard' });
+    await f.emit(guest, 'room:join', { code: f.state(host).code, name: 'Piloto' });
+    assert.equal((await f.emit(host, 'chat:send', { text: '/protocolo3' })).ok, true);
+    await f.wait(guest, state => state.messages.some(message => message.text === 'BT-7274 · Protocolo 3: proteger a la tropa.'));
+    assert.equal((await f.emit(host, 'chat:send', { text: '/protocolo3' })).ok, false);
+    await f.emit(host, 'room:moderate', { target: guest.id, action: 'mute' });
+    assert.equal((await f.emit(guest, 'chat:send', { text: '/protocolo3' })).ok, false);
+    assert.ok(f.state(host).players.every(player => player.score === 0));
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Bolivia'] });
+    for (let game = 0; game < 3; game++) {
+      assert.equal((await f.emit(host, 'game:start')).ok, true);
+      assert.ok(!f.state(host).messages.some(message => message.text.includes('¿No que era la última')));
+      await f.wait(host, state => state.phase === 'finished');
+    }
+    assert.equal((await f.emit(host, 'game:start')).ok, true);
+    await f.wait(guest, state => state.messages.some(message => message.text.includes('¿No que era la última')));
+    assert.equal(f.state(host).messages.filter(message => message.text.includes('¿No que era la última')).length, 1);
+  } finally { await f.close(); }
+});
+
+test('salas públicas: acceso automático, privacidad, permisos y partida en curso', async () => {
+  const f = await fixture();
+  try {
+    const privateHost = await f.connect(); const host = await f.connect(); const guest = await f.connect(); const late = await f.connect();
+    await f.emit(privateHost, 'room:create', { name: 'Privado' });
+    const privateCode = f.state(privateHost).code;
+    assert.equal(f.state(privateHost).visibility, 'private');
+    assert.equal((await f.emit(host, 'room:quick-join', { name: 'Público' })).ok, true);
+    const code = f.state(host).code;
+    assert.notEqual(code, privateCode); assert.equal(f.state(host).visibility, 'public');
+    await f.emit(guest, 'room:quick-join', { name: 'Invitado' });
+    assert.equal(f.state(guest).code, code);
+    assert.equal((await f.emit(guest, 'room:visibility', { visibility: 'private' })).ok, false);
+    assert.equal((await f.emit(host, 'room:visibility', { visibility: 'secret' })).ok, false);
+    await f.emit(host, 'game:start');
+    await f.emit(host, 'game:choose', { word: f.state(host).choices![0] });
+    const deadline = f.state(host).deadline;
+    await f.emit(late, 'room:quick-join', { name: 'Recién llegado' });
+    assert.equal(f.state(late).code, code); assert.equal(f.state(late).phase, 'drawing');
+    assert.equal(f.state(late).word, undefined); assert.equal(f.state(late).choices, undefined);
+    assert.equal(f.state(late).deadline, deadline); assert.equal(f.state(late).players.at(-1)!.score, 0);
+    await f.emit(host, 'room:visibility', { visibility: 'private' });
+    await f.wait(guest, state => state.visibility === 'private');
+    assert.equal(f.state(guest).players.length, 3);
+    const newcomer = await f.connect(); await f.emit(newcomer, 'room:quick-join', { name: 'Otro' });
+    assert.notEqual(f.state(newcomer).code, code); assert.notEqual(f.state(newcomer).code, privateCode);
+    await f.emit(newcomer, 'room:leave');
+    await f.emit(newcomer, 'room:join', { name: 'Con enlace', code: privateCode });
+    assert.equal(f.state(newcomer).code, privateCode);
+  } finally { await f.close(); }
+});
+
+test('acceso público: omite apodos repetidos, expulsiones y salas llenas', async () => {
+  const f = await fixture();
+  try {
+    const host = await f.connect(); await f.emit(host, 'room:quick-join', { name: 'Artista' });
+    const code = f.state(host).code;
+    const duplicate = await f.connect(); await f.emit(duplicate, 'room:quick-join', { name: 'Artista' });
+    assert.notEqual(f.state(duplicate).code, code);
+    await f.emit(duplicate, 'room:leave');
+    const kicked = await f.connect(); await f.emit(kicked, 'room:quick-join', { name: 'Expulsado' });
+    await f.emit(host, 'room:moderate', { target: kicked.id, action: 'kick' });
+    await f.emit(kicked, 'room:quick-join', { name: 'Expulsado' });
+    assert.notEqual(f.state(kicked).code, code);
+    await f.emit(kicked, 'room:leave');
+    for (let i = 0; i < 11; i++) {
+      const guest = await f.connect(); await f.emit(guest, 'room:quick-join', { name: `Jugador${i}` });
+      assert.equal(f.state(guest).code, code);
+    }
+    const overflow = await f.connect(); await f.emit(overflow, 'room:quick-join', { name: 'Sin cupo' });
+    assert.notEqual(f.state(overflow).code, code);
+    assert.equal(f.state(host).players.length, 12);
+  } finally { await f.close(); }
+});
+
+test('red temporal: recupera anfitrión, puntos, turno, palabra y lienzo con el mismo reloj', async () => {
+  const f = await fixture({ choice: 30000, reveal: 30, turn: 30000, reconnect: 2000 });
+  try {
+    const host = await f.connect(); const guest = await f.connect(); const third = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Pintor móvil' });
+    const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { code, name: 'Adivinador móvil' });
+    await f.emit(third, 'room:join', { code, name: 'Otro' });
+    await f.emit(host, 'game:start');
+    const word = f.state(host).choices![0]; await f.emit(host, 'game:choose', { word });
+    await f.emit(host, 'board:action', { id: 'antes-de-suspender', tool: 'brush', color: '#7460bf', size: 6, points: [{ x: 20, y: 30 }] });
+    await f.emit(guest, 'chat:send', { text: word });
+    const score = f.state(guest).players.find(player => player.id === guest.id)!.score;
+    const deadline = f.state(host).deadline;
+    const hostId = host.id;
+    host.io.reconnection(false); host.io.engine.close();
+    await f.wait(third, state => state.players.some(player => player.id === hostId && player.connected === false));
+    assert.equal(f.state(third).host, hostId); assert.equal(f.state(third).phase, 'drawing');
+    const reconnected = once(host, 'connect'); host.connect(); await reconnected;
+    assert.equal(host.recovered, true); assert.equal(host.id, hostId);
+    await f.wait(host, state => state.players.some(player => player.id === hostId && player.connected));
+    assert.equal(f.state(host).word, word); assert.equal(f.state(host).drawer, hostId);
+    assert.equal(f.state(host).deadline, deadline); assert.equal(f.state(host).actions[0].id, 'antes-de-suspender');
+    const guestId = guest.id;
+    guest.io.reconnection(false); guest.io.engine.close();
+    await f.wait(third, state => state.players.some(player => player.id === guestId && !player.connected));
+    const guestBack = once(guest, 'connect'); guest.connect(); await guestBack;
+    assert.equal(guest.recovered, true);
+    await f.wait(guest, state => state.players.some(player => player.id === guestId && player.connected));
+    assert.equal(f.state(guest).word, undefined);
+    assert.equal(f.state(guest).players.find(player => player.id === guestId)!.score, score);
+    assert.equal(f.state(guest).players.find(player => player.id === guestId)!.guessed, true);
+    assert.equal(f.state(host).players.find(player => player.id === hostId)!.score, 100);
+  } finally { await f.close(); }
+});
+
+test('reconexión vencida: libera el puesto y transfiere anfitrión; volver empieza con cero', async () => {
+  const f = await fixture({ choice: 30000, reveal: 30, turn: 30000, reconnect: 60 });
+  try {
+    const host = await f.connect(); const guest = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Móvil' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { code, name: 'Presente' });
+    const oldId = host.id;
+    host.io.reconnection(false); host.io.engine.close();
+    await f.wait(guest, state => state.players.length === 1);
+    assert.equal(f.state(guest).host, guest.id);
+    assert.equal(f.app.game.membership.has(oldId!), false);
+    const reconnected = once(host, 'connect'); host.connect(); await reconnected;
+    assert.equal(host.recovered, false); assert.notEqual(host.id, oldId);
+    await f.emit(host, 'room:join', { code, name: 'Móvil' });
+    assert.equal(f.state(host).players.find(player => player.id === host.id)!.score, 0);
+  } finally { await f.close(); }
+});
 
 test('sala real: privacidad de la palabra, validación, dibujo y puntos', async () => {
   const f = await fixture();

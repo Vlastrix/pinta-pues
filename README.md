@@ -6,7 +6,8 @@ Juego web de dibujar y adivinar para la tropa. Inspirado en la mecánica de Pint
 
 Esta lista describe las funciones implementadas en el código. La web pública puede ir detrás hasta el siguiente despliegue.
 
-- Salas privadas por código o enlace, con 2 a 12 jugadores. Puedes jugar como invitado o crear una cuenta opcional con correo y contraseña.
+- Salas privadas y públicas, con 2 a 12 jugadores. Crear una sala la deja privada por defecto: se comparte por código o enlace y no participa en el acceso público. Puedes jugar como invitado o crear una cuenta opcional con correo y contraseña.
+- «Jugar en sala pública» te une automáticamente a una sala pública con espacio, priorizando las que esperan para empezar; también puede unirte a una partida en curso. Si no encuentra una compatible, crea una pública y te deja de anfitrión. Omite salas llenas, salas de las que fuiste expulsado, apodos repetidos y salas donde ya está tu cuenta. El anfitrión puede cambiar la visibilidad desde la sala de espera o los resultados; hacerla privada no expulsa a quienes ya están dentro. Las privadas no tienen contraseña: cualquiera que tenga su código o enlace puede entrar.
 - Puedes entrar con la partida en curso: comienzas con 0 puntos, recibes el dibujo y las pistas actuales y puedes adivinar de inmediato. Dibujas desde la siguiente ronda; si entras en la última, podrás dibujar en la revancha. Entrar no reinicia el reloj ni cambia el turno actual.
 - Avatar elegible junto al apodo: robots de DiceBear, opciones nuevas al azar y elección guardada en el navegador. Se comparte con todos los jugadores de la sala.
 - Anfitrión que configura entre 1 y 5 rondas, tiempo por turno y categorías.
@@ -31,11 +32,18 @@ Esta lista describe las funciones implementadas en el código. La web pública p
 - Reportar al pintor avisa a la sala y reproduce Steve a quienes tengan sonidos activos. Un reporte por jugador y turno, con 3 segundos entre reportes de la sala. Cuando todos los demás jugadores presentes lo reportan, suena Roblox una sola vez, se revela la palabra durante 5 segundos y pasa el turno al siguiente jugador; si era el último turno, termina la partida. No cambia los puntos ni expulsa al pintor. En partidas de dos personas basta el reporte del único adivinador. Escribir la respuesta en el lienzo se rechaza sin reproducir efectos.
 - El anfitrión puede silenciar o habilitar el chat de otros jugadores, borrar mensajes y expulsar con confirmación. Silenciar no impide enviar un acierto: solo las respuestas correctas pasan al servidor y puntúan. La expulsión bloquea la misma cuenta y navegador durante la vida de la sala y borra los mensajes públicos de ese apodo.
 - Interfaz adaptable a escritorio y móvil; dibujo con mouse, lápiz o pantalla táctil.
+- Reconexión automática ante cortes temporales: reserva el puesto durante 2 minutos, mantiene puntos y turnos y recupera el estado actual al volver desde otra aplicación. Los demás ven «Reconectando…» junto al jugador. La partida sigue corriendo y salir voluntariamente no reserva el lugar.
 - MOTD de texto en la cabecera: chistes malos, frases filosóficas y memes. En pantallas pequeñas ocupa una fila propia debajo del logo y los botones. Se elige uno al azar al abrir o recargar la página y permanece estable mientras juegas. Las frases se editan en `src/Motd.tsx`.
 - Frases aleatorias en la portada: título principal, título del formulario y subtítulo cambian al abrir o recargar, con ocho opciones por sección. Se mantienen mientras usas la página y se personalizan en `src/landingMessages.ts`; las dos líneas del título principal se eligen juntas para conservar su sentido.
 - La frase encima del código de sala también se elige al recargar y se personaliza en la lista `roomTaglines` de `src/landingMessages.ts`.
 - Selector de modo claro/oscuro en la cabecera, con modo claro inicial y preferencia guardada en cada navegador. El tema se aplica al recargar y se sincroniza entre pestañas del mismo navegador; cada jugador elige el suyo. El lienzo sigue blanco en ambos temas para conservar los colores del dibujo.
 - En móvil, el chat aparece antes de la clasificación y las herramientas se ocultan a quienes adivinan durante la partida. El lienzo se adapta al espacio visible al escribir; los mensajes nuevos desplazan solo el historial del chat. El teclado virtual debe comprobarse también en dispositivos reales.
+
+## Easter eggs
+
+- `/protocolo3` en el chat responde a la sala: «BT-7274 · Protocolo 3: proteger a la tropa». Respeta las restricciones y pausas del chat y no modifica puntos.
+- Siete clics o toques al logo activan el modo salteña: cambia el icono del logo y el cursor del pincel en tu navegador, sin alterar trazos ni herramientas. Otros siete lo desactivan; recargar también lo reinicia.
+- Al iniciar la tercera revancha tras tres partidas completas en la misma sala, aparece «¿No que era la última, pues?». Las partidas interrumpidas no cuentan; el contador desaparece con la sala o al reiniciar el servidor.
 
 ## Stack y arquitectura
 
@@ -68,6 +76,12 @@ En las tarjetas de jugadores, el anfitrión abre «Moderar a…» para silenciar
 Detrás del Caddy incluido en Compose se usa `TRUST_PROXY=1` para contar la IP real. Fuera de ese despliegue deja `TRUST_PROXY=0` y no habilites la confianza en cabeceras si el backend recibe tráfico directo de Internet.
 
 ## Ejecutar en desarrollo
+
+### Donaciones
+
+El texto «Apoyar Pinta Pues» del footer, con estilo de enlace a la derecha de Bolivia y su bandera, abre el QR de Binance y permite guardar la imagen desde el celular. En pantallas pequeñas pasa a otra línea si falta espacio. Coloca tu QR como **`public/images/binance-qr.png`** (imagen PNG con su margen blanco y buena resolución). Si no existe o no carga, se muestra un aviso de que aún no está disponible. Para usar otro nombre o formato, actualiza `qrPath` en `src/DonationButton.tsx`. La imagen será pública al desplegar; el diálogo muestra el QR y no procesa ni confirma pagos. Después de cambiarla, vuelve a compilar y desplegar.
+
+### Desarrollo local
 
 Requisitos: **Node.js 24 o superior** y npm. El módulo SQLite integrado puede mostrar una advertencia de función experimental según la versión de Node; no necesita instalar SQLite por separado.
 
@@ -146,7 +160,7 @@ compose.yaml        Aplicación, almacenamiento y Caddy
 
 ## Límites actuales y siguientes pasos
 
-- **Reconexión:** al desconectarse, el jugador sale y pierde su puntuación; el anfitrión pasa al siguiente jugador. Puede volver a entrar como un jugador nuevo con 0 puntos y dibujar desde la siguiente ronda. Si quedan menos de dos, se vuelve a la sala de espera. Falta recuperar sesiones con un período de gracia.
+- **Reconexión:** una caída temporal de red o suspensión al cambiar de aplicación reserva el lugar durante 2 minutos. Al reconectar desde la misma página se conservan puntos, apodo, anfitrión y turnos, y se recibe el estado actual del lienzo y chat. La partida y el reloj continúan; no se pausan mientras alguien está desconectado. Al vencer el plazo, el jugador sale y se transfiere el anfitrión si corresponde; con menos de dos se vuelve a la sala de espera. Salir voluntariamente o ser expulsado no reserva el puesto. Recargar, cerrar la pestaña o reiniciar el servidor no recupera automáticamente el lugar. Hay que comprobar la suspensión real en dispositivos Android/iOS; el navegador puede descartar la página por completo.
 - **Reinicios:** interrumpen las partidas activas; catálogo y resultados finales permanecen en disco. Las palabras personalizadas desaparecen con la sala.
 - **Un solo proceso:** no ejecutar réplicas ni un clúster de Node. Redis y PostgreSQL se evaluarán si la carga medida requiere distribuir partidas.
 - **Límites de seguridad:** los invitados pueden evadir el bloqueo de navegador borrando sus cookies; las cuentas sí conservan su bloqueo de sala al reconectar. No hay verificación de correo, recuperación de contraseña, MFA ni sanciones globales. Los límites locales no sustituyen la protección contra DDoS del proveedor; los bloqueos de sala y contadores de frecuencia se reinician con el proceso.

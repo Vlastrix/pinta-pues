@@ -8,8 +8,9 @@ import { Game } from './game.js';
 import { Store } from './store.js';
 import { Auth } from './auth.js';
 import { clientIp, sameOrigin, WindowLimiter } from './security.js';
+import { RECONNECT_GRACE_MS } from '../shared/types.js';
 
-export function createApp(dbPath = process.env.DB_PATH ?? './data/pinta-pues.sqlite', timing?: { choice: number; reveal: number; turn?: number }) {
+export function createApp(dbPath = process.env.DB_PATH ?? './data/pinta-pues.sqlite', timing?: { choice: number; reveal: number; turn?: number; reconnect?: number }) {
   const app = express();
   app.disable('x-powered-by');
   const limiter = new WindowLimiter();
@@ -25,6 +26,7 @@ export function createApp(dbPath = process.env.DB_PATH ?? './data/pinta-pues.sql
   app.use(express.json({ limit: '8kb' }));
   const http = createServer(app);
   const io = new Server(http, {
+    connectionStateRecovery: { maxDisconnectionDuration: timing?.reconnect ?? RECONNECT_GRACE_MS, skipMiddlewares: false },
     maxHttpBufferSize: 32000,
     allowRequest: (req, callback) => callback(null, sameOrigin(req) && limiter.allow(`connect:${clientIp(req)}`, 60, 60000)),
   });
@@ -36,6 +38,10 @@ export function createApp(dbPath = process.env.DB_PATH ?? './data/pinta-pues.sql
     const connections = [...io.sockets.sockets.values()].filter(other => other.data.ip === ip).length;
     if (connections >= 24 || io.sockets.sockets.size >= 1000) { next(new Error('Demasiadas conexiones.')); return; }
     const identity = auth.identities(socket.request);
+    if (socket.recovered && (socket.data.userId !== identity.account?.id
+      || !(socket.data.identities as string[]).some(id => identity.ids.includes(id) || id === `guest:${socket.id}`))) {
+      next(new Error('Tu sesión cambió. Vuelve a entrar a la sala.')); return;
+    }
     socket.data.ip = ip;
     socket.data.identities = identity.ids.length ? identity.ids : [`guest:${socket.id}`];
     socket.data.userId = identity.account?.id;

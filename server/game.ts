@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
 import { z } from 'zod';
-import { tools, WIDTH, HEIGHT, DEFAULT_AVATAR, AVATAR_PATTERN, MAX_DRAW_ACTIONS, type DrawAction, type Message, type Player, type RoomView, type Settings } from '../shared/types.js';
+import { tools, WIDTH, HEIGHT, DEFAULT_AVATAR, AVATAR_PATTERN, MAX_DRAW_ACTIONS, RECONNECT_GRACE_MS, type DrawAction, type Message, type Player, type RoomView, type Settings } from '../shared/types.js';
 import { Store, normalize } from './store.js';
 import { hintSteps, maskWord } from './hints.js';
 import { WindowLimiter } from './security.js';
@@ -13,7 +13,7 @@ type Room = {
   queue: { id: string; round: number }[]; turn: number; timer?: ReturnType<typeof setTimeout>; pointCount: number;
   reporters: Set<string>; lastReportAt: number; penaltyPlayed: boolean;
   hint: string; hintTimer?: ReturnType<typeof setTimeout>;
-  banned: Set<string>;
+  banned: Set<string>; completedGames: number; visibility: RoomView['visibility'];
 };
 const nameSchema = z.string().trim().min(2, 'Tu apodo necesita al menos 2 letras.').max(20);
 const avatarSchema = z.string().regex(AVATAR_PATTERN, 'Elige un avatar válido.').default(DEFAULT_AVATAR);
@@ -37,7 +37,10 @@ export class Game {
   rooms = new Map<string, Room>();
   membership = new Map<string, string>();
   private activity = new WindowLimiter();
-  constructor(private io: Server, private store: Store, private timing: { choice: number; reveal: number; turn?: number } = { choice: 15000, reveal: 5000 }) {
+  private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private disconnectedSockets = new Map<string, Socket>();
+  private closing = false;
+  constructor(private io: Server, private store: Store, private timing: { choice: number; reveal: number; turn?: number; reconnect?: number } = { choice: 15000, reveal: 5000 }) {
     io.on('connection', socket => this.connect(socket));
   }
   private system(room: Room, text: string, kind: Message['kind'] = 'system') {
@@ -47,7 +50,7 @@ export class Game {
   private view(room: Room, id: string): RoomView {
     const secret = room.phase === 'reveal' || room.phase === 'finished' || room.drawer === id;
     return {
-      code: room.code, you: id, host: room.host, players: room.players, phase: room.phase,
+      code: room.code, you: id, host: room.host, players: room.players.map(player => ({ ...player, connected: this.io.sockets.sockets.has(player.id) })), phase: room.phase, visibility: room.visibility,
       settings: room.settings, round: room.round, drawer: room.drawer, deadline: room.deadline,
       serverTime: Date.now(), hint: room.hint,
       ...(secret && room.word ? { word: room.word } : {}),
@@ -95,6 +98,7 @@ export class Game {
     }
     if (!next) {
       room.phase = 'finished'; room.deadline = 0; room.drawer = null;
+      room.completedGames++;
       this.store.saveResult(room.code, room.players.map(({ name, score }) => ({ name, score })));
       this.system(room, '¡Se acabó, pues! ¿Sale la revancha?');
       this.broadcast(room); return;
@@ -157,6 +161,8 @@ export class Game {
     this.system(room, 'Esperando al menos dos jugadores para empezar.'); this.broadcast(room);
   }
   private leave(socket: Socket) {
+    clearTimeout(this.reconnectTimers.get(socket.id)); this.reconnectTimers.delete(socket.id);
+    this.disconnectedSockets.delete(socket.id);
     const room = this.rooms.get(this.membership.get(socket.id) ?? '');
     if (!room) return;
     this.membership.delete(socket.id); socket.leave(room.code);
@@ -174,6 +180,16 @@ export class Game {
     else this.broadcast(room);
   }
   private connect(socket: Socket) {
+    clearTimeout(this.reconnectTimers.get(socket.id)); this.reconnectTimers.delete(socket.id);
+    this.disconnectedSockets.delete(socket.id);
+    if (socket.recovered) {
+      const room = this.rooms.get(this.membership.get(socket.id) ?? '');
+      if (room) this.broadcast(room);
+      else {
+        for (const name of socket.rooms) if (name !== socket.id) socket.leave(name);
+        socket.emit('room:left');
+      }
+    }
     let windowStart = Date.now(); let events = 0; let lastChat = 0;
     const handle = <T>(event: string, schema: z.ZodType<T>, callback: (data: T, room?: Room) => void, needsRoom = true) => {
       socket.on(event, (raw: unknown, ack: unknown) => {
@@ -196,7 +212,7 @@ export class Game {
         }
       });
     };
-    handle('room:create', z.object({ name: nameSchema, avatar: avatarSchema }), ({ name, avatar }) => {
+    const createRoom = ({ name, avatar, visibility }: { name: string; avatar: string; visibility: RoomView['visibility'] }) => {
       if (this.membership.has(socket.id)) throw new Error('Ya estás en una sala.');
       if (this.rooms.size >= 200) throw new Error('El servidor está lleno. Prueba en un rato.');
       if (!this.activity.allow(`create:${socket.data.ip}`, 10, 60000)) throw new Error('Demasiadas salas creadas. Espera un minuto.');
@@ -209,18 +225,18 @@ export class Game {
         customWords: [], used: new Set(), queue: [], turn: 0, pointCount: 0,
         reporters: new Set(), lastReportAt: 0, penaltyPlayed: false,
         hint: '',
-        banned: new Set(),
+        banned: new Set(), completedGames: 0, visibility,
       };
       this.rooms.set(code, room); this.membership.set(socket.id, code); socket.join(code);
       this.system(room, `${name} creó la sala. ¡Que entre la tropa!`); this.broadcast(room);
-    }, false);
-    handle('room:join', z.object({ name: nameSchema, avatar: avatarSchema, code: z.string().trim().toUpperCase().regex(/^[A-F0-9]{6}$/) }), ({ name, avatar, code }) => {
+    };
+    const joinRoom = ({ name, avatar, code }: { name: string; avatar: string; code: string }) => {
       if (this.membership.has(socket.id)) throw new Error('Ya estás en una sala.');
       if (!this.activity.allow(`join:${socket.data.ip}`, 30, 60000)) throw new Error('Demasiados intentos de entrar. Espera un minuto.');
       const room = this.rooms.get(code);
       if (!room) throw new Error('Esa sala no existe o ya se cerró.');
       if ((socket.data.identities as string[]).some(id => room.banned.has(id))) throw new Error('Fuiste expulsado de esta sala.');
-      if (socket.data.userId && room.players.some(player => this.io.sockets.sockets.get(player.id)?.data.userId === socket.data.userId)) throw new Error('Tu cuenta ya está en esta sala.');
+      if (socket.data.userId && room.players.some(player => this.playerSocket(player.id)?.data.userId === socket.data.userId)) throw new Error('Tu cuenta ya está en esta sala.');
       if (room.players.length >= 12) throw new Error('La sala está llena (12 jugadores).');
       if (room.players.some(player => normalize(player.name) === normalize(name))) throw new Error('Ese apodo ya está en la sala.');
       room.players.push({ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId) });
@@ -235,14 +251,36 @@ export class Game {
           : `${name} entra a adivinar. ¡Podrá dibujar en la revancha!`);
       }
       this.broadcast(room);
+    };
+    handle('room:create', z.object({ name: nameSchema, avatar: avatarSchema, visibility: z.enum(['private', 'public']).default('private') }), createRoom, false);
+    handle('room:join', z.object({ name: nameSchema, avatar: avatarSchema, code: z.string().trim().toUpperCase().regex(/^[A-F0-9]{6}$/) }), joinRoom, false);
+    handle('room:quick-join', z.object({ name: nameSchema, avatar: avatarSchema }), ({ name, avatar }) => {
+      if (this.membership.has(socket.id)) throw new Error('Ya estás en una sala.');
+      const available = [...this.rooms.values()].filter(room => room.visibility === 'public' && room.players.length < 12
+        && !(socket.data.identities as string[]).some(id => room.banned.has(id))
+        && !room.players.some(player => normalize(player.name) === normalize(name))
+        && !(socket.data.userId && room.players.some(player => this.playerSocket(player.id)?.data.userId === socket.data.userId)));
+      const waiting = available.filter(room => room.phase === 'lobby' || room.phase === 'finished');
+      const pool = waiting.length ? waiting : available;
+      const room = pool[Math.floor(Math.random() * pool.length)];
+      if (room) joinRoom({ name, avatar, code: room.code });
+      else createRoom({ name, avatar, visibility: 'public' });
     }, false);
+    handle('room:visibility', z.object({ visibility: z.enum(['private', 'public']) }), ({ visibility }, room) => {
+      this.requireHost(socket, room!);
+      if (room!.visibility === visibility) return;
+      if (!this.activity.allow(`visibility:${socket.id}`, 10, 60000)) throw new Error('Espera un minuto antes de cambiar la visibilidad otra vez.');
+      room!.visibility = visibility;
+      this.system(room!, visibility === 'public' ? 'La sala ahora es pública. ¡Que se sume la tropa!' : 'La sala ahora es privada. Se entra por código o enlace.');
+      this.broadcast(room!);
+    });
     handle('room:leave', z.object({}), () => { this.leave(socket); socket.emit('room:left'); });
     handle('room:moderate', z.object({ target: z.string().min(1).max(100), action: z.enum(['kick', 'mute', 'unmute']) }), ({ target, action }, room) => {
       this.requireHost(socket, room!);
       if (target === socket.id) throw new Error('No puedes moderarte a vos mismo.');
       const player = room!.players.find(player => player.id === target);
       if (!player) throw new Error('Ese jugador ya no está en la sala.');
-      const targetSocket = this.io.sockets.sockets.get(target);
+      const targetSocket = this.playerSocket(target);
       if (!targetSocket) throw new Error('Ese jugador ya no está conectado.');
       this.store.logModeration(room!.code, socket.data.identities[0], targetSocket.data.identities[0], action);
       if (action === 'kick') {
@@ -289,6 +327,7 @@ export class Game {
       const words = [...this.store.words(room!.settings.categories), ...(room!.settings.categories.includes('Personalizadas') ? room!.customWords : [])];
       if (new Set(words.map(normalize)).size < 3) throw new Error('Elige categorías con al menos tres palabras.');
       room!.players.forEach(player => { player.score = 0; player.guessed = false; });
+      if (room!.completedGames === 3) this.system(room!, '¿No que era la última, pues? —La tropa, tres revanchas después.');
       room!.queue = Array.from({ length: room!.settings.rounds }, (_, index) => room!.players.map(player => ({ id: player.id, round: index + 1 }))).flat();
       room!.turn = 0; this.next(room!);
     });
@@ -301,6 +340,10 @@ export class Game {
       lastChat = Date.now();
       const player = room!.players.find(player => player.id === socket.id)!;
       if (player.muted && !(room!.phase === 'drawing' && socket.id !== room!.drawer && !player.guessed && normalize(text) === normalize(room!.word))) throw new Error('Tu chat está silenciado. Solo puedes enviar la respuesta correcta.');
+      const postMessage = () => {
+        if (text.toLowerCase() === '/protocolo3') this.system(room!, 'BT-7274 · Protocolo 3: proteger a la tropa.');
+        else room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
+      };
       if (room!.phase === 'drawing') {
         if (Date.now() >= room!.deadline) throw new Error('El tiempo para adivinar terminó.');
         if (room!.drawer === socket.id || player.guessed) throw new Error('Espera al siguiente turno para chatear.');
@@ -314,9 +357,9 @@ export class Game {
           if (room!.players.filter(p => p.id !== room!.drawer).every(p => p.guessed)) { this.reveal(room!); return; }
         } else {
           if (normalize(text).includes(normalize(room!.word))) throw new Error('Escribe solamente la respuesta.');
-          room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
+          postMessage();
         }
-      } else room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
+      } else postMessage();
       room!.messages = room!.messages.slice(-80); this.broadcast(room!);
     });
     handle('game:report', z.object({}), (_, room) => {
@@ -359,13 +402,29 @@ export class Game {
     handle('board:clear', z.object({}), (_, room) => {
       this.requireDrawer(socket, room!); room!.actions = []; room!.pointCount = 0; this.broadcast(room!);
     });
-    socket.on('disconnect', () => this.leave(socket));
+    socket.on('disconnect', reason => {
+      if (this.closing) return;
+      const room = this.rooms.get(this.membership.get(socket.id) ?? '');
+      if (room && ['transport close', 'transport error', 'ping timeout'].includes(reason)) {
+        this.disconnectedSockets.set(socket.id, socket);
+        this.io.to(room.code).emit('board:cursor', { drawer: socket.id, cursor: null });
+        this.reconnectTimers.set(socket.id, setTimeout(() => this.leave(socket), this.timing.reconnect ?? RECONNECT_GRACE_MS));
+        this.broadcast(room);
+      } else this.leave(socket);
+    });
   }
   private requireHost(socket: Socket, room: Room) {
     if (room.host !== socket.id) throw new Error('Solo el anfitrión puede hacer eso.');
   }
+  private playerSocket(id: string) { return this.io.sockets.sockets.get(id) ?? this.disconnectedSockets.get(id); }
   private requireDrawer(socket: Socket, room: Room) {
     if (room.drawer !== socket.id || room.phase !== 'drawing' || Date.now() >= room.deadline) throw new Error('Todavía no es tu turno para dibujar.');
   }
-  close() { for (const room of this.rooms.values()) this.clearTimers(room); }
+  close() {
+    this.closing = true;
+    for (const timer of this.reconnectTimers.values()) clearTimeout(timer);
+    this.reconnectTimers.clear();
+    this.disconnectedSockets.clear();
+    for (const room of this.rooms.values()) this.clearTimers(room);
+  }
 }
