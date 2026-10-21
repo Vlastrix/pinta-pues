@@ -294,9 +294,9 @@ export class Game {
           if (room!.players.filter(p => p.id !== room!.drawer).every(p => p.guessed)) { this.reveal(room!); return; }
         } else {
           if (normalize(text).includes(normalize(room!.word))) throw new Error('Escribe solamente la respuesta.');
-          room!.messages.push({ id: randomUUID(), name: player.name, text, kind: 'chat' });
+          room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
         }
-      } else room!.messages.push({ id: randomUUID(), name: player.name, text, kind: 'chat' });
+      } else room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
       room!.messages = room!.messages.slice(-80); this.broadcast(room!);
     });
     handle('game:report', z.object({}), (_, room) => {

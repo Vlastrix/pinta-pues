@@ -8,6 +8,7 @@ import { SoundPlayer } from './sound';
 import { AvatarImage, AvatarPicker } from './AvatarPicker';
 import { AccountPanel } from './AccountPanel';
 import { ModerationDialog } from './ModerationDialog';
+import { ChatMessages } from './ChatMessages';
 
 const socket = io({ autoConnect: false });
 let sessionRequest: Promise<{ user: AccountUser | null }> | undefined;
@@ -280,7 +281,7 @@ export default function App() {
         </section>
         <aside className="chat-panel panel"><div className="panel-heading"><span className="chat-bubble">···</span><h2>El chisme</h2><button className="icon-button" aria-label={muted ? 'Activar sonidos' : 'Silenciar sonidos'} title={muted ? 'Activar sonidos' : 'Silenciar sonidos'} disabled={loadingAudio} onClick={() => void toggleSounds()}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button></div>
           {!muted && <label className="sound-volume">Volumen<input aria-label="Volumen de efectos" type="range" min="0" max="100" value={Math.round(volume * 100)} onChange={event => { const value = Number(event.target.value) / 100; setVolume(value); sounds.current?.setVolume(value); }} /></label>}
-          <div className="messages" aria-live="polite" aria-label="Chat de la sala">{room.messages.map(message => <div className={`message ${message.kind}`} key={message.id}>{message.kind === 'chat' ? <><strong>{message.name}</strong><span>{message.text}</span>{isHost && <button className="delete-message" aria-label={`Borrar mensaje de ${message.name}`} title="Borrar mensaje" onClick={() => emit('chat:delete', { id: message.id })}><Trash2 size={12} /></button>}</> : <span>{message.kind === 'correct' ? '✦ ' : ''}{message.text}</span>}</div>)}<div ref={bottom} /></div>
+          <div className="messages" aria-live="polite" aria-label="Chat de la sala"><ChatMessages messages={room.messages} you={room.you} onDelete={isHost ? id => { void emit('chat:delete', { id }); } : undefined} /><div ref={bottom} /></div>
           <form className="chat-form" onFocusCapture={() => setChatFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setChatFocused(false); }} onSubmit={event => { event.preventDefault(); event.currentTarget.querySelector('input')?.focus(); if (chat.trim()) emit('chat:send', { text: chat }, () => setChat('')); }}><label className="sr-only" htmlFor="guess">Tu respuesta o mensaje</label><input id="guess" autoComplete="off" placeholder={room.phase === 'drawing' ? isDrawer || player?.guessed ? '¡Shhh! Guardá el secreto.' : '¿Qué será, pues?' : 'Decí algo a la tropa…'} maxLength={200} value={chat} disabled={chatDisabled} onChange={e => setChat(e.target.value)} /><button aria-label="Enviar mensaje" disabled={!chat.trim() || chatDisabled}><Send size={18} /></button></form><p className="chat-tip">{room.phase === 'drawing' ? 'Escribí la palabra aquí para adivinar.' : 'Se permiten chistes malos. Dibujos también.'}</p>
         </aside>
       </div>

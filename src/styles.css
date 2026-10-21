@@ -40,6 +40,16 @@
 .message.chat:has(.delete-message) { padding-right: 20px; }
 .delete-message { position: absolute; right: 0; top: 19px; width: 20px; height: 24px; display: grid; place-items: center; background: none; color: #ad93b9; border-radius: 5px; }
 .delete-message:hover { background: #f6e5e4; color: #ae635b; }
+.messages .message.chat { gap: 3px; margin-bottom: 3px; }
+.messages .message.chat.group-end { margin-bottom: 14px; }
+.messages .message.chat > span { max-width: 92%; border-radius: 14px; }
+.messages .message.chat:not(.own):not(.group-start) > span { border-top-left-radius: 5px; }
+.messages .message.chat:not(.own):not(.group-end) > span { border-bottom-left-radius: 5px; }
+.messages .message.chat.own { align-items: flex-end; }
+.messages .message.chat.own > span { align-self: flex-end; background: var(--purple); color: #fff; }
+.messages .message.chat.own:not(.group-start) > span { border-top-right-radius: 5px; }
+.messages .message.chat.own:not(.group-end) > span { border-bottom-right-radius: 5px; }
+.message.chat:not(.group-start) .delete-message { top: 0; }
 .report-button > span { font-size: 10px; background: #f1e7dc; border-radius: 4px; padding: 2px 5px; }
 @media (max-width: 650px) { .header-right:has(.account-trigger) .connection { display: none; } .account-trigger { font-size: 10px; padding: 7px; gap: 5px; } }
 .reveal-banner {
