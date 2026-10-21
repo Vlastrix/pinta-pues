@@ -26,7 +26,7 @@ test('móvil: adivinar junto al dibujo, chat sin saltos y herramientas al cambia
     expect((await canvas.boundingBox())!.y).toBeGreaterThanOrEqual(0);
     await phone.setViewportSize({ width: 360, height: 640 });
     await phone.evaluate(() => window.scrollTo(0, 0));
-    expect((await input.boundingBox())!.y + (await input.boundingBox())!.height).toBeLessThanOrEqual(640);
+    await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height; }).toBeLessThanOrEqual(640);
     await phone.setViewportSize({ width: 390, height: 844 });
     await phone.screenshot({ path: 'test-results/mobile-guesser.png', fullPage: true });
     const scrollBefore = await phone.evaluate(() => scrollY);
@@ -39,6 +39,7 @@ test('móvil: adivinar junto al dibujo, chat sin saltos y herramientas al cambia
     await input.fill('intento de prueba');
     await expect(phone.locator('.game-page')).toHaveClass(/chat-focused/);
     await phone.evaluate(() => window.scrollTo(0, 0));
+    await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height; }).toBeLessThanOrEqual(420);
     const smallCanvas = (await canvas.boundingBox())!;
     const smallInput = (await input.boundingBox())!;
     expect(smallCanvas.width / smallCanvas.height).toBeCloseTo(1.5, 1);

@@ -21,7 +21,7 @@ export function AccountPanel({ user, disabled, onChanged }: { user: AccountUser 
     finally { setBusy(false); }
   }
   return <>
-    <button className="account-trigger" disabled={disabled} onClick={() => { setError(''); dialog.current?.showModal(); }}><UserRound size={17} />{user ? 'Mi cuenta' : 'Entrar con cuenta'}</button>
+    <button className="account-trigger" aria-label={user ? 'Mi cuenta' : 'Entrar con cuenta'} title={user ? 'Mi cuenta' : 'Entrar con cuenta'} disabled={disabled} onClick={() => { setError(''); dialog.current?.showModal(); }}><UserRound size={17} /><span>{user ? 'Mi cuenta' : 'Entrar con cuenta'}</span></button>
     <dialog ref={dialog} className="account-dialog" aria-labelledby="account-title" onClose={() => setPassword('')}>
       <div className="account-heading"><h2 id="account-title">{user ? 'Mi cuenta' : mode === 'register' ? 'Crear cuenta' : 'Entrar con cuenta'}</h2><button className="icon-button" aria-label="Cerrar cuenta" onClick={() => dialog.current?.close()}><X size={18} /></button></div>
       {user ? <><p className="account-email">{user.email}</p><button className="button secondary" disabled={busy} onClick={() => void submit('logout')}><LogOut size={15} />Cerrar sesión</button></> : <>

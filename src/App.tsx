@@ -9,6 +9,7 @@ import { AvatarImage, AvatarPicker } from './AvatarPicker';
 import { AccountPanel } from './AccountPanel';
 import { ModerationDialog } from './ModerationDialog';
 import { ChatMessages } from './ChatMessages';
+import { ThemeToggle } from './ThemeToggle';
 
 const socket = io({ autoConnect: false });
 let sessionRequest: Promise<{ user: AccountUser | null }> | undefined;
@@ -219,6 +220,7 @@ export default function App() {
     <header className="site-header">
       <a className="brand" href="/" onClick={event => { if (room) event.preventDefault(); }} aria-label="Pinta Pues inicio"><span className="brand-icon"><Pencil size={24} /></span><span>Pinta<span className="brand-purple">Pues</span><span className="brand-dot">.</span></span></a>
       <div className="header-right">{!connected && <span className="connection"><i />Conectando…</span>}<span className="made-in">Hecho en Bolivia <span className="flag">▰</span></span>
+        <ThemeToggle />
         {!room && <AccountPanel user={account} disabled={!connected} onChanged={user => { setAccount(user); socket.disconnect(); socket.connect(); }} />}
         {room && <button className="icon-button" title="Salir de la sala" aria-label="Salir de la sala" onClick={() => emit('room:leave', {})}><LogOut size={19} /></button>}
       </div>

@@ -1,0 +1,84 @@
+:root {
+  color-scheme: light;
+  --theme-surface: #fffdf9;
+  --theme-hover: #f2ecfa;
+}
+.theme-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 36px; min-height: 36px; padding: 7px 10px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--theme-surface); color: var(--deep); font-size: 11px; }
+.theme-toggle:hover { background: var(--theme-hover); }
+@media (max-width: 650px) {
+  .theme-toggle { padding: 7px; }
+  .theme-toggle > span { display: none; }
+}
+@media (max-width: 380px) {
+  .account-trigger { min-width: 36px; min-height: 36px; justify-content: center; }
+  .account-trigger > span { display: none; }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: #f1edf7;
+  background: #17151e;
+  --purple: #b8a0f0;
+  --deep: #cbb6ff;
+  --border: #443a52;
+  --muted: #b7adc6;
+  --theme-surface: #211e2b;
+  --theme-hover: #342b45;
+  --theme-raised: #2b2638;
+  --theme-field: #1b1823;
+}
+:root[data-theme="dark"] :is(input, select, textarea) { background: var(--theme-field); border-color: var(--border); color: #f1edf7; }
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder { color: #aea2be; }
+:root[data-theme="dark"] :is(.panel, .entry-card, .account-dialog, .moderation-dialog, .avatar-dialog, .board-surface) { background: var(--theme-surface); border-color: var(--border); }
+:root[data-theme="dark"] .entry-card { box-shadow: 6px 7px 0 #100e17; }
+:root[data-theme="dark"] .board-surface { box-shadow: 0 4px 0 #100e17; }
+:root[data-theme="dark"] .brand-icon { color: #302b3c; }
+:root[data-theme="dark"] .sticker { color: #302b3c; }
+:root[data-theme="dark"] :is(.eyebrow, .hero-copy > p, .hero-tags, .card-kicker, .entry-note, .under-card, .lobby > p, .board-overlay p, .winner p, .how-it-works p, .site-footer, .board-caption, .chat-tip, .custom-words small, .settings-grid label, .category-picker > span, .player-rank, .player strong small, .player > div > span) { color: var(--muted); }
+:root[data-theme="dark"] :is(.how-it-works strong, .panel-heading h2) { color: #e8e0f2; }
+:root[data-theme="dark"] .doodle text { fill: var(--muted); }
+:root[data-theme="dark"] :is(.entry-tabs, .players-note, .avatar-option, .player, .report-button > span) { background: var(--theme-raised); border-color: var(--border); color: var(--muted); }
+:root[data-theme="dark"] .entry-tabs button.selected { background: #443456; color: #eee2ff; box-shadow: none; }
+:root[data-theme="dark"] .primary { background: #7756b5; border-color: #ad8ae5; color: #fff; box-shadow: 0 3px 0 #49316c; }
+:root[data-theme="dark"] .primary:not(:disabled):hover { background: #8664c7; box-shadow: 0 4px 0 #49316c; }
+:root[data-theme="dark"] :is(.secondary, .account-trigger, .avatar-trigger, .chat-form) { background: var(--theme-field); border-color: var(--border); }
+:root[data-theme="dark"] .secondary:not(:disabled):hover,
+:root[data-theme="dark"] :is(.icon-button, .player-menu, .avatar-trigger, .avatar-option):hover { background: var(--theme-hover); border-color: #816b9e; }
+:root[data-theme="dark"] .how-it-works > div > span { background: #2c2439; border-color: var(--border); color: #c6b0e1; }
+:root[data-theme="dark"] .category-picker button { background: var(--theme-raised); border-color: var(--border); color: #c3b6d1; }
+:root[data-theme="dark"] .category-picker button.selected,
+:root[data-theme="dark"] :is(.inline-code, .waiting-host, .player.active, .avatar-option.selected) { background: #392b4c; border-color: #9c7bc6; color: #dcc4ff; }
+:root[data-theme="dark"] .player { box-shadow: 0 2px 0 #16121e; }
+:root[data-theme="dark"] .player.active { box-shadow: 0 2px 0 #4d365f; }
+:root[data-theme="dark"] .player.guessed { background: #23372c; border-color: #527e60; box-shadow: 0 2px 0 #183320; }
+:root[data-theme="dark"] .player.guessed .player-indicator { color: #9fd7aa; }
+:root[data-theme="dark"] :is(.player-avatar, .avatar-trigger) { background: #342a45; border-color: #655176; }
+:root[data-theme="dark"] .panel-heading > span:last-child:not(.chat-bubble) { background: #352940; color: #c9addf; }
+:root[data-theme="dark"] :is(.minimum-note, .brush-size, .brush-size span, .word-strip > span) { color: var(--muted); }
+:root[data-theme="dark"] :is(.timer, .word-strip) { background: #30253f; border-color: #554066; color: #d3b5fa; }
+:root[data-theme="dark"] .word-strip strong { color: #dec8ff; }
+:root[data-theme="dark"] .timer.urgent { background: #4e292e; color: #ffb5a9; }
+:root[data-theme="dark"] .board-overlay { background: #211e2bf5; }
+:root[data-theme="dark"] .tool-button { color: #c2b2d2; }
+:root[data-theme="dark"] .tool-button:not(:disabled):hover { background: var(--theme-hover); }
+:root[data-theme="dark"] .tool-button.selected { background: #44305e; border-color: #9a78c4; color: #e0c8ff; }
+:root[data-theme="dark"] :is(.color-row, .entry-note, .sound-volume) { border-color: var(--border); }
+:root[data-theme="dark"] .tool-divider { background: var(--border); }
+:root[data-theme="dark"] .swatch { border-color: #ffffff45; }
+:root[data-theme="dark"] .swatch.selected::after { border-color: #e5d3ff; }
+:root[data-theme="dark"] .messages { scrollbar-color: #655176 transparent; }
+:root[data-theme="dark"] .message.chat strong { color: #c4a7df; }
+:root[data-theme="dark"] .message.chat > span { background: #342b41; color: #f1eaf7; }
+:root[data-theme="dark"] .messages .message.chat.own > span { background: #7555b3; color: #fff; }
+:root[data-theme="dark"] .message.system { color: #b8a8c7; }
+:root[data-theme="dark"] .message.correct { background: #24382b; color: #a6dbab; }
+:root[data-theme="dark"] .report-button { background: #30252a; border-color: #634851; color: #edbcb2; }
+:root[data-theme="dark"] .report-button:not(:disabled):hover { background: #443038; }
+:root[data-theme="dark"] .reveal-banner { background: linear-gradient(110deg, #38264d, #271e36); border-color: #9772c2; color: #e0c4ff; }
+:root[data-theme="dark"] .reveal-copy > p { color: #c2adcf; }
+:root[data-theme="dark"] .reveal-copy b { color: #e0c4ff; }
+:root[data-theme="dark"] .reveal-icon { background: #493a20; border-color: #8d713a; color: #f6d789; }
+:root[data-theme="dark"] :is(.form-error, .danger) { background: #48292f; border-color: #92606a; color: #ffb8b5; }
+:root[data-theme="dark"] .delete-message:hover { background: #48292f; color: #ffb8b5; }
+:root[data-theme="dark"] :is(.account-dialog, .moderation-dialog, .avatar-dialog)::backdrop { background: #05030bad; }
