@@ -10,6 +10,8 @@ import { AccountPanel } from './AccountPanel';
 import { ModerationDialog } from './ModerationDialog';
 import { ChatMessages } from './ChatMessages';
 import { ThemeToggle } from './ThemeToggle';
+import { Motd } from './Motd';
+import { pickLandingMessages } from './landingMessages';
 
 const socket = io({ autoConnect: false });
 let sessionRequest: Promise<{ user: AccountUser | null }> | undefined;
@@ -47,6 +49,7 @@ function Doodle({ small = false }: { small?: boolean }) {
 }
 
 export default function App() {
+  const [landingMessages] = useState(pickLandingMessages);
   const [room, setRoom] = useState<RoomView | null>(null);
   const [account, setAccount] = useState<AccountUser | null>(null);
   const [moderatingId, setModeratingId] = useState<string | null>(null);
@@ -219,7 +222,8 @@ export default function App() {
   return <div className="app-shell">
     <header className="site-header">
       <a className="brand" href="/" onClick={event => { if (room) event.preventDefault(); }} aria-label="Pinta Pues inicio"><span className="brand-icon"><Pencil size={24} /></span><span>Pinta<span className="brand-purple">Pues</span><span className="brand-dot">.</span></span></a>
-      <div className="header-right">{!connected && <span className="connection"><i />Conectando…</span>}<span className="made-in">Hecho en Bolivia <span className="flag">▰</span></span>
+      <Motd />
+      <div className="header-right">{!connected && <span className="connection"><i />Conectando…</span>}
         <ThemeToggle />
         {!room && <AccountPanel user={account} disabled={!connected} onChanged={user => { setAccount(user); socket.disconnect(); socket.connect(); }} />}
         {room && <button className="icon-button" title="Salir de la sala" aria-label="Salir de la sala" onClick={() => emit('room:leave', {})}><LogOut size={19} /></button>}
@@ -227,12 +231,12 @@ export default function App() {
     </header>
     {!room ? <main className="landing">
       <section className="hero-copy">
-        <h1>Vos dibujá.<br />La tropa <span>adivina.<svg viewBox="0 0 300 16"><path d="M3 10Q100 0 295 9M22 15q141-7 245-1" /></svg></span></h1>
+        <h1>{landingMessages.hero.firstLine}<br />{landingMessages.hero.secondLine}<span>{landingMessages.hero.highlight}<svg viewBox="0 0 300 16" aria-hidden="true"><path d="M3 10Q100 0 295 9M22 15q141-7 245-1" /></svg></span></h1>
         <p>Juntá a tus amigos, soltá el artista que llevás dentro y preparate para dibujos que no entiende ni su autor.</p>
         <Doodle />
       </section>
       <section className="entry-wrap"><span className="sticker">¡Ya pues, entrá! <Sparkles size={18} /></span><div className="entry-card">
-        <h2>Se arma la partidovich<span>✳</span></h2><p>La salteña puede esperar. Tu sala, no.</p>
+        <h2>{landingMessages.title}<span>✳</span></h2><p>{landingMessages.subtitle}</p>
         <form onSubmit={enter}><label htmlFor="nickname">¿Cómo te dice la tropa?</label><div className="input-with-icon"><AvatarPicker value={avatar} onChange={seed => { setAvatar(seed); localStorage.setItem('pinta-avatar', seed); }} /><input id="nickname" autoComplete="nickname" placeholder="Tu apodo legendario" value={name} minLength={2} maxLength={20} required onChange={event => setName(event.target.value)} /></div>
           <div className="entry-tabs"><button type="button" className={!joining ? 'selected' : ''} onClick={() => setJoining(false)}><Plus size={17} /> Crear sala</button><button type="button" className={joining ? 'selected' : ''} onClick={() => setJoining(true)}><Users size={17} /> Unirme</button></div>
           {joining && <div className="code-field"><label htmlFor="code">Código de la sala</label><input id="code" value={code} placeholder="Ej. A1B2C3" maxLength={6} minLength={6} required onChange={event => setCode(event.target.value.toUpperCase())} /></div>}
@@ -241,7 +245,7 @@ export default function App() {
       </div></section>
       <section className="how-it-works"><div><span>01</span><p><strong>Juntá a la tropa</strong>Creá una sala y pasá el enlace.</p></div><div><span>02</span><p><strong>Dibujá lo que te toque</strong>¿Algo filosófico? ¿Goku? Vos podés.</p></div><div><span>03</span><p><strong>Adiviná antes que todos</strong>Más rápido, más puntos. Así de fácil.</p></div></section>
     </main> : <main className={`game-page ${chatFocused ? 'chat-focused' : ''}`}>
-      <div className={`room-heading ${!editable ? 'active-game-heading' : ''}`}><div><span className="eyebrow">LA TROPA ESTÁ REUNIDA</span><h1>Sala <span>{room.code}</span></h1></div>
+      <div className={`room-heading ${!editable ? 'active-game-heading' : ''}`}><div><span className="eyebrow">{landingMessages.roomTagline}</span><h1>Sala <span>{room.code}</span></h1></div>
         {!editable && <div className="turn-header">
           <div className="board-top"><div><span className="status-dot" /><strong>{room.phase === 'choosing' ? isDrawer ? 'Elegí tu palabra' : 'El dibujante está eligiendo' : room.phase === 'reveal' ? '¡Así era, pues!' : isDrawer ? 'Te toca dibujar' : `${room.players.find(p => p.id === room.drawer)?.name} está dibujando`}</strong></div><span className={`timer ${seconds <= 10 ? 'urgent' : ''}`}>{seconds}s</span></div>
           <div className="word-strip"><span>{room.word ? room.phase === 'reveal' ? 'LA PALABRA ERA' : 'TU PALABRA' : 'ADIVINÁ LA PALABRA'}</span><strong className={!room.word ? 'hint' : ''}>{room.word ?? (room.phase === 'choosing' ? '• • •' : room.hint)}</strong></div>
@@ -274,7 +278,7 @@ export default function App() {
               </div>}
             </>}
           </div>
-          {room.phase === 'drawing' && !isDrawer && <div className="report-row"><button className="report-button" aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} disabled={room.reported} title="Es una broma: activa avisos y sonidos, sin cambiar puntos ni terminar el turno" onClick={() => emit('game:report', {})}><Flag size={14} />{room.reported ? 'Pintor reportado' : 'Reportar al pintor'}<span>{room.reportCount}/{room.reportRequired}</span></button></div>}
+          {room.phase === 'drawing' && !isDrawer && <div className="report-row"><button className="report-button" aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} disabled={room.reported} title="Si todos reportan al pintor, se revela la palabra y pasa el turno. Los puntos no cambian." onClick={() => emit('game:report', {})}><Flag size={14} />{room.reported ? 'Pintor reportado' : 'Reportar al pintor'}<span>{room.reportCount}/{room.reportRequired}</span></button></div>}
           <div className={`toolbar panel ${!drawing ? 'disabled-tools' : ''}`}><div className="tools">{toolOptions.map(({ id, label, icon: Icon, shortcuts }) => <button className={`tool-button ${tool === id ? 'selected' : ''}`} title={`${label} (${shortcuts.join(' / ').toUpperCase()})`} aria-label={label} aria-keyshortcuts={shortcuts.join(' ').toUpperCase()} aria-pressed={tool === id} key={id} disabled={!drawing} onClick={() => setTool(id)}><Icon size={19} /></button>)}<span className="tool-divider" /><button className="tool-button" title="Deshacer (Ctrl+Z / ⌘Z)" aria-label="Deshacer" aria-keyshortcuts="Control+Z Meta+Z" disabled={!drawing || !room.actions.length} onClick={() => emit('board:undo', {})}><Undo2 size={18} /></button><button className="tool-button" title="Limpiar lienzo" aria-label="Limpiar lienzo" disabled={!drawing || !room.actions.length} onClick={() => emit('board:clear', {})}><Trash2 size={17} /></button></div>
             <div className="color-row"><div className="palette">{colors.map(value => <button key={value} aria-label={`Color ${value}`} title={value} disabled={!drawing} className={`swatch ${color === value ? 'selected' : ''}`} style={{ background: value }} onClick={() => setColor(value)} />)}<label className="custom-color" title="Otro color"><Plus size={15} /><input type="color" aria-label="Color personalizado" disabled={!drawing} value={color} onChange={e => setColor(e.target.value)} /></label></div><label className="brush-size">Grosor<input aria-label="Grosor del pincel" type="range" min="2" max="40" disabled={!drawing} value={size} onChange={e => setSize(Number(e.target.value))} /><span>{size}</span></label></div>
             {tool === 'text' && <input ref={textInput} className="canvas-text" aria-label="Texto para el lienzo" placeholder="Primero escribí acá; después tocá el lienzo para colocarlo." value={text} maxLength={50} disabled={!drawing} onChange={e => setText(e.target.value)} />}
@@ -289,7 +293,7 @@ export default function App() {
       </div>
     </main>}
     <ModerationDialog player={isHost ? room?.players.find(player => player.id === moderatingId) ?? null : null} onClose={() => setModeratingId(null)} onAction={(target, action) => emit('room:moderate', { target, action })} />
-    <footer className="site-footer"><span>Pinta Pues <span className="footer-spark">✳</span> Con cariño, desde Bolivia.</span><small>© {new Date().getFullYear()} Vanguard &amp; TheOutBounded</small></footer>
+    <footer className="site-footer"><span>Pinta Pues <span className="footer-spark">✳</span> Con cariño, desde Bolivia. <span className="flag footer-flag" role="img" aria-label="Bandera de Bolivia" /></span><small>© {new Date().getFullYear()} Vanguard &amp; TheOutBounded</small></footer>
     {notice && <div className="toast" role="status">{notice}<button aria-label="Cerrar aviso" onClick={() => setNotice('')}>×</button></div>}
   </div>;
 }

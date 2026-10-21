@@ -2,9 +2,12 @@
 
 Juego web de dibujar y adivinar para la tropa. Inspirado en la mecánica de Pinturillo, con nombre, interfaz y código propios; palabras bolivianas, categorías y herramientas de dibujo adicionales.
 
-## Primera versión
+## Funciones implementadas
+
+Esta lista describe las funciones implementadas en el código. La web pública puede ir detrás hasta el siguiente despliegue.
 
 - Salas privadas por código o enlace, con 2 a 12 jugadores. Puedes jugar como invitado o crear una cuenta opcional con correo y contraseña.
+- Puedes entrar con la partida en curso: comienzas con 0 puntos, recibes el dibujo y las pistas actuales y puedes adivinar de inmediato. Dibujas desde la siguiente ronda; si entras en la última, podrás dibujar en la revancha. Entrar no reinicia el reloj ni cambia el turno actual.
 - Avatar elegible junto al apodo: robots de DiceBear, opciones nuevas al azar y elección guardada en el navegador. Se comparte con todos los jugadores de la sala.
 - Anfitrión que configura entre 1 y 5 rondas, tiempo por turno y categorías.
 - Cada jugador dibuja una vez por ronda. Elige entre hasta tres palabras; si no elige en 15 segundos, se selecciona una automáticamente.
@@ -15,17 +18,22 @@ Juego web de dibujar y adivinar para la tropa. Inspirado en la mecánica de Pint
 - Para los espectadores, el primer punto se envía al apoyar el pincel y los tramos siguientes se envían cada 24 ms, incluso si el mouse hace una pausa. Las actualizaciones recibidas se agrupan por frame y se pintan solo los tramos nuevos.
 - Pistas progresivas iguales para todos: el máximo es la mitad de las letras o números de la respuesta, redondeando hacia abajo (3 → 1, 4 → 2, 6 → 3, 10 → 5). Hasta tres pistas aparecen al 35%, 60% y 80% del turno; si la palabra permite más, se reparten entre el 35% y el 80%. Los espacios y guiones se mantienen y no cuentan para calcular el máximo. Las pistas se reinician en cada turno.
 - Pincel, borrador, línea, rectángulo, elipse, estrella, balde de relleno y texto; colores, grosor, deshacer y limpiar.
+- El borrador muestra un círculo del tamaño del área que borra, adaptado a la escala del lienzo y visible también para los demás jugadores.
 - Atajos durante tu turno: P o B (pincel), E (borrador), L (línea), R (rectángulo), O (círculo), S (estrella), F (relleno) y T (texto). También puedes usar 1–8 en el orden de la barra. Ctrl+Z o ⌘Z deshacen; los atajos no interfieren al escribir en campos ni con diálogos abiertos. Cada botón muestra sus atajos al pasar el cursor.
 - Cursor compartido del dibujante: lápiz del color elegido, animación al trazar y posición sincronizada para los demás, adaptada al tamaño de cada lienzo. Los movimientos se agrupan en intervalos de 32 ms y no se guardan como trazos; salir del lienzo o terminar el turno oculta el cursor. La animación respeta la preferencia de movimiento reducido.
 - Texto del lienzo validado en el servidor: bloquea la respuesta completa incluso con tildes, mayúsculas, espacios o puntuación intercalada. Esto no impide sinónimos, abreviaciones o letras dibujadas a mano.
 - 660 palabras en 12 categorías: Bolivia, Cotidianas, Sistemas, Anime, Comida, Animales, Naturaleza, Deportes, Videojuegos, Profesiones, Cine y series y Fantasía. Sistemas incluye 100 palabras entre tecnología y conceptos de la carrera: diagramas, bases de datos, programación, redes y sistemas operativos. Se pueden combinar todas las categorías y añadir palabras personalizadas.
 - Palabras personalizadas por sala, separadas por comas o saltos de línea. Se permiten jergas y malas palabras del grupo; no hay filtro de vocabulario. Al agregarlas se activa la categoría Personalizadas.
 - Adivinar concede entre 100 y 500 puntos según el tiempo restante. El dibujante recibe 100 por cada acierto. Al adivinar todos o agotarse el tiempo, se revela la respuesta durante 5 segundos.
+- Las respuestas se comparan sin distinguir tildes ni mayúsculas; también se ignoran espacios y signos de puntuación.
 - Clasificación, revancha y resultados de partidas terminadas guardados en SQLite.
-- Sonidos con silencio y volumen: tono al acertar, Steve (Minecraft) al denunciar y Roblox cuando todos los demás jugadores denuncian al dibujante. Activados por defecto al crear o unirse a una sala, con volumen al 35%; pulsa el altavoz del chat para silenciarlos o reactivarlos.
-- Reportar al pintor es una broma: avisa a la sala y reproduce Steve a quienes tengan sonidos activos. Un reporte por jugador y turno, con 3 segundos entre reportes de la sala. Cuando todos los demás jugadores presentes lo reportan, suena Roblox una sola vez. No cambia los puntos, no termina el turno y no expulsa. En partidas de dos personas basta el reporte del único adivinador. Escribir la respuesta en el lienzo se rechaza sin reproducir efectos.
+- Sonidos con silencio y volumen: sonido al acertar, fanfarria al terminar la partida, Steve (Minecraft) al denunciar y Roblox cuando todos los demás jugadores denuncian al dibujante. Activados por defecto al crear o unirse a una sala, con volumen al 35%; pulsa el altavoz del chat para silenciarlos o reactivarlos.
+- Reportar al pintor avisa a la sala y reproduce Steve a quienes tengan sonidos activos. Un reporte por jugador y turno, con 3 segundos entre reportes de la sala. Cuando todos los demás jugadores presentes lo reportan, suena Roblox una sola vez, se revela la palabra durante 5 segundos y pasa el turno al siguiente jugador; si era el último turno, termina la partida. No cambia los puntos ni expulsa al pintor. En partidas de dos personas basta el reporte del único adivinador. Escribir la respuesta en el lienzo se rechaza sin reproducir efectos.
 - El anfitrión puede silenciar o habilitar el chat de otros jugadores, borrar mensajes y expulsar con confirmación. Silenciar no impide enviar un acierto: solo las respuestas correctas pasan al servidor y puntúan. La expulsión bloquea la misma cuenta y navegador durante la vida de la sala y borra los mensajes públicos de ese apodo.
 - Interfaz adaptable a escritorio y móvil; dibujo con mouse, lápiz o pantalla táctil.
+- MOTD de texto en la cabecera: chistes malos, frases filosóficas y memes. En pantallas pequeñas ocupa una fila propia debajo del logo y los botones. Se elige uno al azar al abrir o recargar la página y permanece estable mientras juegas. Las frases se editan en `src/Motd.tsx`.
+- Frases aleatorias en la portada: título principal, título del formulario y subtítulo cambian al abrir o recargar, con ocho opciones por sección. Se mantienen mientras usas la página y se personalizan en `src/landingMessages.ts`; las dos líneas del título principal se eligen juntas para conservar su sentido.
+- La frase encima del código de sala también se elige al recargar y se personaliza en la lista `roomTaglines` de `src/landingMessages.ts`.
 - Selector de modo claro/oscuro en la cabecera, con modo claro inicial y preferencia guardada en cada navegador. El tema se aplica al recargar y se sincroniza entre pestañas del mismo navegador; cada jugador elige el suyo. El lienzo sigue blanco en ambos temas para conservar los colores del dibujo.
 - En móvil, el chat aparece antes de la clasificación y las herramientas se ocultan a quienes adivinan durante la partida. El lienzo se adapta al espacio visible al escribir; los mensajes nuevos desplazan solo el historial del chat. El teclado virtual debe comprobarse también en dispositivos reales.
 
@@ -138,12 +146,12 @@ compose.yaml        Aplicación, almacenamiento y Caddy
 
 ## Límites actuales y siguientes pasos
 
-- **Reconexión:** al desconectarse, el jugador sale y pierde su puntuación; el anfitrión pasa al siguiente jugador. No se admiten ingresos a partidas en curso. Si quedan menos de dos, se vuelve a la sala de espera. Falta recuperar sesiones con un período de gracia.
+- **Reconexión:** al desconectarse, el jugador sale y pierde su puntuación; el anfitrión pasa al siguiente jugador. Puede volver a entrar como un jugador nuevo con 0 puntos y dibujar desde la siguiente ronda. Si quedan menos de dos, se vuelve a la sala de espera. Falta recuperar sesiones con un período de gracia.
 - **Reinicios:** interrumpen las partidas activas; catálogo y resultados finales permanecen en disco. Las palabras personalizadas desaparecen con la sala.
 - **Un solo proceso:** no ejecutar réplicas ni un clúster de Node. Redis y PostgreSQL se evaluarán si la carga medida requiere distribuir partidas.
 - **Límites de seguridad:** los invitados pueden evadir el bloqueo de navegador borrando sus cookies; las cuentas sí conservan su bloqueo de sala al reconectar. No hay verificación de correo, recuperación de contraseña, MFA ni sanciones globales. Los límites locales no sustituyen la protección contra DDoS del proveedor; los bloqueos de sala y contadores de frecuencia se reinician con el proceso.
 - **Biblioteca personal:** falta guardar y administrar paquetes propios entre sesiones, editar el catálogo desde la interfaz y consultar el historial guardado.
-- **Dibujo:** falta zoom, atajos y relleno con tolerancia ajustable. Los límites actuales son 8.000 operaciones y 60.000 puntos por turno; deshacer o limpiar libera espacio.
+- **Dibujo:** falta zoom y relleno con tolerancia ajustable. Los límites actuales son 8.000 operaciones y 60.000 puntos por turno; deshacer o limpiar libera espacio.
 - **Calidad visual:** Canvas usa fuentes y suavizado del navegador; el aspecto del texto y los bordes puede variar ligeramente entre dispositivos.
 
-Primera meta: una partida completa entre amigos. Después, reconexión, paquetes persistentes y las mecánicas propias de Pinta Pues.
+Siguientes mejoras: reconexión, paquetes persistentes y más mecánicas propias de Pinta Pues.

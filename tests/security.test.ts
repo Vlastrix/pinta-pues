@@ -6,8 +6,8 @@ import { createApp } from '../server/app.js';
 import { WindowLimiter } from '../server/security.js';
 import type { RoomView } from '../shared/types.js';
 
-async function fixture() {
-  const app = createApp(':memory:'); app.http.listen(0, '127.0.0.1'); await once(app.http, 'listening');
+async function fixture(timing?: { choice: number; reveal: number; turn?: number }) {
+  const app = createApp(':memory:', timing); app.http.listen(0, '127.0.0.1'); await once(app.http, 'listening');
   const url = `http://127.0.0.1:${(app.http.address() as { port: number }).port}`;
   const sockets: Socket[] = []; const states = new Map<Socket, RoomView>();
   const jar = () => {
@@ -125,22 +125,29 @@ test('moderación: solo anfitrión, borrar mensajes, silencio sin impedir aciert
   } finally { await f.close(); }
 });
 
-test('reportes de broma: unanimidad no cambia puntos ni termina el turno', async () => {
-  const f = await fixture();
+test('reportes: solo la unanimidad termina el turno y los puntos se conservan', async () => {
+  const f = await fixture({ choice: 30000, reveal: 200, turn: 30000 });
   try {
     const host = await f.connect(); const guest = await f.connect(); const third = await f.connect();
     await f.emit(host, 'room:create', { name: 'Uno' }); const code = f.state(host).code;
     await f.emit(guest, 'room:join', { name: 'Dos', code }); await f.emit(third, 'room:join', { name: 'Tres', code });
     await f.emit(host, 'game:start'); await f.emit(host, 'game:choose', { word: f.state(host).choices![0] });
     f.app.game.rooms.get(code)!.players[0].score = 300;
+    const word = f.state(host).word;
     await f.emit(guest, 'game:report'); assert.equal(f.state(guest).phase, 'drawing');
+    assert.equal((await f.emit(guest, 'game:report')).ok, false);
     await new Promise(resolve => setTimeout(resolve, 3050));
     await f.emit(third, 'game:report'); const state = await f.wait(third, state => state.reportCount === 2);
     assert.equal(state.players.find(player => player.id === host.id)!.score, 300);
-    assert.equal(state.phase, 'drawing'); assert.equal(state.reportRequired, 2);
+    assert.equal(state.phase, 'reveal'); assert.equal(state.reportRequired, 2);
+    assert.equal(state.word, word);
+    assert.ok(state.players.filter(player => player.id !== host.id).every(player => player.score === 0));
     assert.equal((await f.emit(third, 'game:report')).ok, false);
-    assert.equal((await f.emit(host, 'board:clear')).ok, true);
+    assert.equal((await f.emit(host, 'board:clear')).ok, false);
     assert.equal((f.app.store.db.prepare("SELECT COUNT(*) AS count FROM moderation WHERE action = 'report-unanimous'").get() as { count: number }).count, 1);
+    await f.wait(guest, state => state.phase === 'choosing' && state.drawer === guest.id);
+    assert.equal(f.state(guest).reportCount, 0);
+    assert.equal(f.state(guest).players.find(player => player.id === host.id)!.score, 300);
   } finally { await f.close(); }
 });
 

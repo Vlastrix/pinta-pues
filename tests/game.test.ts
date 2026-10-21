@@ -114,6 +114,78 @@ test('partida completa: alterna dibujantes, finaliza, persiste resultados y admi
   } finally { await f.close(); }
 });
 
+test('ingresos en curso: elección, dibujo y revelación sin filtrar respuestas ni alterar las rondas', async () => {
+  const f = await fixture({ choice: 30000, reveal: 150, turn: 250 });
+  try {
+    const host = await f.connect(); const guest = await f.connect();
+    const choosingJoin = await f.connect(); const drawingJoin = await f.connect(); const revealJoin = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Uno' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { name: 'Dos', code });
+    await f.emit(host, 'room:settings', { rounds: 2, duration: 30, categories: ['Bolivia'] });
+    await f.emit(host, 'game:start');
+    const choiceDeadline = f.state(host).deadline;
+    assert.equal((await f.emit(choosingJoin, 'room:join', { name: 'Tres', code })).ok, true);
+    assert.equal(f.state(choosingJoin).choices, undefined);
+    assert.equal(f.state(choosingJoin).word, undefined);
+    assert.equal(f.state(choosingJoin).deadline, choiceDeadline);
+    const word = f.state(host).choices![0];
+    await f.emit(host, 'game:choose', { word });
+    const action = { id: 'before-join', tool: 'rectangle', color: '#292438', size: 6, points: [{ x: 20, y: 20 }, { x: 80, y: 80 }] };
+    await f.emit(host, 'board:action', action);
+    const deadline = f.state(host).deadline;
+    assert.equal((await f.emit(drawingJoin, 'room:join', { name: 'Cuatro', code })).ok, true);
+    const state = f.state(drawingJoin);
+    assert.equal(state.drawer, host.id); assert.equal(state.round, 1); assert.equal(state.deadline, deadline);
+    assert.equal(state.word, undefined); assert.equal(state.choices, undefined);
+    assert.equal(state.hint, f.state(guest).hint);
+    assert.deepEqual(state.actions, [action]);
+    assert.equal(state.players.find(player => player.id === drawingJoin.id)!.score, 0);
+    assert.equal(state.reportRequired, 3);
+    assert.equal((await f.emit(drawingJoin, 'board:clear')).ok, false);
+    assert.equal((await f.emit(drawingJoin, 'chat:send', { text: word })).ok, true);
+    assert.ok(f.state(drawingJoin).players.find(player => player.id === drawingJoin.id)!.score > 0);
+    await f.wait(host, state => state.phase === 'reveal');
+    assert.equal((await f.emit(revealJoin, 'room:join', { name: 'Cinco', code })).ok, true);
+    assert.equal(f.state(revealJoin).word, word);
+    assert.equal(f.state(revealJoin).players.find(player => player.id === revealJoin.id)!.score, 0);
+    const turns = [[guest, 1], [host, 2], [guest, 2], [choosingJoin, 2], [drawingJoin, 2], [revealJoin, 2]] as const;
+    for (const [drawer, round] of turns) {
+      const next = await f.wait(drawer, state => state.phase === 'choosing' && state.drawer === drawer.id);
+      assert.equal(next.round, round);
+      assert.equal(f.state(drawer === host ? guest : host).choices, undefined);
+      assert.equal((await f.emit(drawer, 'game:choose', { word: next.choices![0] })).ok, true);
+    }
+    await f.wait(host, state => state.phase === 'finished');
+    assert.equal(f.state(host).round, 2);
+  } finally { await f.close(); }
+});
+
+test('ingreso en última ronda: adivina sin turno extra y dibuja en la revancha', async () => {
+  const f = await fixture({ choice: 30000, reveal: 80, turn: 150 });
+  try {
+    const host = await f.connect(); const guest = await f.connect(); const late = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Uno' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { name: 'Dos', code });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Bolivia'] });
+    await f.emit(host, 'game:start');
+    await f.emit(late, 'room:join', { name: 'Tres', code });
+    assert.ok(f.state(late).messages.some(message => message.text.includes('Podrá dibujar en la revancha')));
+    for (const drawer of [host, guest]) {
+      const state = await f.wait(drawer, state => state.phase === 'choosing' && state.drawer === drawer.id);
+      await f.emit(drawer, 'game:choose', { word: state.choices![0] });
+    }
+    await f.wait(late, state => state.phase === 'finished');
+    assert.equal(f.state(late).players.find(player => player.id === late.id)!.score, 0);
+    await f.emit(host, 'game:start');
+    for (const drawer of [host, guest, late]) {
+      const state = await f.wait(drawer, state => state.phase === 'choosing' && state.drawer === drawer.id);
+      assert.equal(state.round, 1);
+      await f.emit(drawer, 'game:choose', { word: state.choices![0] });
+    }
+    await f.wait(host, state => state.phase === 'finished');
+  } finally { await f.close(); }
+});
+
 test('palabras de sesión: revanchas, últimas opciones, variantes y reciclaje por categoría', async () => {
   const f = await fixture({ choice: 30000, reveal: 30, turn: 30 });
   try {
@@ -171,7 +243,8 @@ test('desconexiones: transfiere anfitrión, vuelve al lobby y limpia la sala vac
     await f.emit(guest, 'room:join', { name: 'Dos', code });
     await f.emit(host, 'game:start');
     const late = await f.connect();
-    assert.equal((await f.emit(late, 'room:join', { name: 'Tres', code })).ok, false);
+    assert.equal((await f.emit(late, 'room:join', { name: 'Tres', code })).ok, true);
+    await f.emit(late, 'room:leave');
     host.disconnect();
     const state = await f.wait(guest, state => state.players.length === 1 && state.phase === 'lobby');
     assert.equal(state.host, guest.id);
@@ -213,7 +286,7 @@ test('datos inválidos no alteran salas y el servidor sigue respondiendo', async
 });
 
 test('audios: Roblox solo tras denuncias unánimes, una vez por turno y en su sala', async () => {
-  const f = await fixture();
+  const f = await fixture({ choice: 30000, reveal: 200, turn: 30000 });
   try {
     const host = await f.connect(); const guest = await f.connect(); const third = await f.connect(); const outsider = await f.connect();
     const heard = new Map<Socket, string[]>();
@@ -254,12 +327,53 @@ test('audios: Roblox solo tras denuncias unánimes, una vez por turno y en su sa
     assert.equal((await f.emit(third, 'game:report')).ok, false);
     assert.equal((await f.emit(guest, 'game:report')).ok, false);
     assert.deepEqual(heard.get(outsider), []);
-    await f.emit(guest, 'chat:send', { text: word });
-    await f.emit(third, 'chat:send', { text: word });
     await f.wait(guest, state => state.phase === 'choosing' && state.drawer === guest.id);
     assert.equal(f.state(guest).reported, false);
     await f.wait(third, state => state.phase === 'choosing');
     assert.equal(f.state(third).reported, false);
+  } finally { await f.close(); }
+});
+
+test('reportes: recalcula unanimidad al salir alguien y descarta los votos de quienes salen', async () => {
+  for (const leavesReporter of [false, true]) {
+    const f = await fixture({ choice: 30000, reveal: 200, turn: 30000 });
+    try {
+      const host = await f.connect(); const guest = await f.connect(); const third = await f.connect();
+      await f.emit(host, 'room:create', { name: 'Uno' });
+      const code = f.state(host).code;
+      await f.emit(guest, 'room:join', { name: 'Dos', code });
+      await f.emit(third, 'room:join', { name: 'Tres', code });
+      await f.emit(host, 'game:start');
+      await f.emit(host, 'game:choose', { word: f.state(host).choices![0] });
+      await f.emit(guest, 'game:report');
+      await f.emit(leavesReporter ? guest : third, 'room:leave');
+      const state = await f.wait(host, state => state.players.length === 2);
+      assert.equal(state.phase, leavesReporter ? 'drawing' : 'reveal');
+      assert.equal(state.reportCount, leavesReporter ? 0 : 1);
+      assert.ok(state.players.every(player => player.score === 0));
+    } finally { await f.close(); }
+  }
+});
+
+test('dos jugadores: un reporte pasa el turno y reportar el último termina la partida sin quitar puntos', async () => {
+  const f = await fixture({ choice: 30000, reveal: 100, turn: 30000 });
+  try {
+    const host = await f.connect(); const guest = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Uno' });
+    await f.emit(guest, 'room:join', { name: 'Dos', code: f.state(host).code });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Bolivia'] });
+    await f.emit(host, 'game:start');
+    await f.emit(host, 'game:choose', { word: f.state(host).choices![0] });
+    assert.equal((await f.emit(guest, 'game:report')).ok, true);
+    assert.equal(f.state(guest).phase, 'reveal');
+    await f.wait(guest, state => state.phase === 'choosing' && state.drawer === guest.id);
+    await f.emit(guest, 'game:choose', { word: f.state(guest).choices![0] });
+    assert.equal((await f.emit(host, 'game:report')).ok, true);
+    assert.equal(f.state(host).phase, 'reveal');
+    await f.wait(host, state => state.phase === 'finished');
+    assert.ok(f.state(host).players.every(player => player.score === 0));
+    const result = f.app.store.db.prepare('SELECT scores FROM results').get() as { scores: string };
+    assert.ok(JSON.parse(result.scores).every((player: { score: number }) => player.score === 0));
   } finally { await f.close(); }
 });
 

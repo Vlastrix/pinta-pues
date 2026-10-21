@@ -10,7 +10,7 @@ type Room = {
   code: string; host: string; players: Player[]; phase: RoomView['phase']; settings: Settings;
   round: number; drawer: string | null; deadline: number; word: string; choices: string[];
   actions: DrawAction[]; messages: Message[]; customWords: string[]; used: Set<string>;
-  queue: string[]; turn: number; timer?: ReturnType<typeof setTimeout>; pointCount: number;
+  queue: { id: string; round: number }[]; turn: number; timer?: ReturnType<typeof setTimeout>; pointCount: number;
   reporters: Set<string>; lastReportAt: number; penaltyPlayed: boolean;
   hint: string; hintTimer?: ReturnType<typeof setTimeout>;
   banned: Set<string>;
@@ -88,11 +88,10 @@ export class Game {
     this.clearTimers(room);
     const previousWord = normalize(room.word);
     if (room.players.length < 2) { this.reset(room); return; }
-    let next: string | undefined;
+    let next: Room['queue'][number] | undefined;
     while (room.turn < room.queue.length) {
-      next = room.queue[room.turn++];
-      if (room.players.some(player => player.id === next)) break;
-      next = undefined;
+      const candidate = room.queue[room.turn++];
+      if (room.players.some(player => player.id === candidate.id)) { next = candidate; break; }
     }
     if (!next) {
       room.phase = 'finished'; room.deadline = 0; room.drawer = null;
@@ -100,8 +99,8 @@ export class Game {
       this.system(room, '¡Se acabó, pues! ¿Sale la revancha?');
       this.broadcast(room); return;
     }
-    room.round = Math.floor((room.turn - 1) / (room.queue.length / room.settings.rounds)) + 1;
-    room.drawer = next; room.phase = 'choosing'; room.word = ''; room.actions = []; room.pointCount = 0;
+    room.round = next.round;
+    room.drawer = next.id; room.phase = 'choosing'; room.word = ''; room.actions = []; room.pointCount = 0;
     room.hint = '';
     room.reporters.clear(); room.lastReportAt = 0; room.penaltyPlayed = false;
     room.players.forEach(player => { player.guessed = false; });
@@ -138,6 +137,18 @@ export class Game {
     this.schedule(room, this.timing.reveal, () => this.next(room));
     this.broadcast(room);
   }
+  private finishReportedTurn(room: Room) {
+    if (room.phase !== 'drawing' || room.penaltyPlayed || Date.now() >= room.deadline) return false;
+    const voters = room.players.filter(player => player.id !== room.drawer);
+    if (!voters.length || !voters.every(player => room.reporters.has(player.id))) return false;
+    room.penaltyPlayed = true;
+    const drawer = room.players.find(player => player.id === room.drawer)!;
+    this.store.logModeration(room.code, 'unanimous-vote', this.io.sockets.sockets.get(drawer.id)?.data.identities[0] ?? drawer.id, 'report-unanimous');
+    this.system(room, 'Todos reportaron al pintor. ¡Oof! Pasamos al siguiente turno.');
+    this.io.to(room.code).emit('sound:play', 'penalty');
+    this.reveal(room);
+    return true;
+  }
   private reset(room: Room) {
     this.clearTimers(room); room.phase = 'lobby'; room.drawer = null; room.deadline = 0;
     room.word = ''; room.choices = []; room.actions = []; room.pointCount = 0; room.round = 0;
@@ -158,7 +169,8 @@ export class Game {
     if (room.players.length < 2 && !['lobby', 'finished'].includes(room.phase)) this.reset(room);
     else if (room.drawer === socket.id && ['drawing', 'choosing'].includes(room.phase)) {
       this.system(room, 'El dibujante salió. Pasamos al siguiente turno.'); this.next(room);
-    } else if (room.phase === 'drawing' && room.players.filter(p => p.id !== room.drawer).every(p => p.guessed)) this.reveal(room);
+    } else if (this.finishReportedTurn(room)) return;
+    else if (room.phase === 'drawing' && room.players.filter(p => p.id !== room.drawer).every(p => p.guessed)) this.reveal(room);
     else this.broadcast(room);
   }
   private connect(socket: Socket) {
@@ -210,11 +222,19 @@ export class Game {
       if ((socket.data.identities as string[]).some(id => room.banned.has(id))) throw new Error('Fuiste expulsado de esta sala.');
       if (socket.data.userId && room.players.some(player => this.io.sockets.sockets.get(player.id)?.data.userId === socket.data.userId)) throw new Error('Tu cuenta ya está en esta sala.');
       if (room.players.length >= 12) throw new Error('La sala está llena (12 jugadores).');
-      if (!['lobby', 'finished'].includes(room.phase)) throw new Error('La partida ya empezó. Entra cuando termine.');
       if (room.players.some(player => normalize(player.name) === normalize(name))) throw new Error('Ese apodo ya está en la sala.');
       room.players.push({ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId) });
       this.membership.set(socket.id, code); socket.join(code);
-      this.system(room, `${name} llegó. ¡Ahora sí!`); this.broadcast(room);
+      this.system(room, `${name} llegó. ¡Ahora sí!`);
+      if (!['lobby', 'finished'].includes(room.phase)) {
+        for (let round = room.round + 1; round <= room.settings.rounds; round++) room.queue.push({ id: socket.id, round });
+        // New entries belong only to future rounds; the consumed prefix stays unchanged.
+        room.queue.sort((a, b) => a.round - b.round);
+        this.system(room, room.round < room.settings.rounds
+          ? `${name} entra a adivinar y dibujará desde la ronda ${room.round + 1}.`
+          : `${name} entra a adivinar. ¡Podrá dibujar en la revancha!`);
+      }
+      this.broadcast(room);
     }, false);
     handle('room:leave', z.object({}), () => { this.leave(socket); socket.emit('room:left'); });
     handle('room:moderate', z.object({ target: z.string().min(1).max(100), action: z.enum(['kick', 'mute', 'unmute']) }), ({ target, action }, room) => {
@@ -269,7 +289,7 @@ export class Game {
       const words = [...this.store.words(room!.settings.categories), ...(room!.settings.categories.includes('Personalizadas') ? room!.customWords : [])];
       if (new Set(words.map(normalize)).size < 3) throw new Error('Elige categorías con al menos tres palabras.');
       room!.players.forEach(player => { player.score = 0; player.guessed = false; });
-      room!.queue = Array.from({ length: room!.settings.rounds }, () => room!.players.map(player => player.id)).flat();
+      room!.queue = Array.from({ length: room!.settings.rounds }, (_, index) => room!.players.map(player => ({ id: player.id, round: index + 1 }))).flat();
       room!.turn = 0; this.next(room!);
     });
     handle('game:choose', z.object({ word: z.string().max(40) }), ({ word }, room) => {
@@ -308,13 +328,7 @@ export class Game {
       const player = room!.players.find(player => player.id === socket.id)!;
       this.system(room!, `${player.name} reportó al pintor.`);
       this.io.to(room!.code).emit('sound:play', 'report');
-      if (!room!.penaltyPlayed && room!.players.filter(player => player.id !== room!.drawer).every(player => room!.reporters.has(player.id))) {
-        room!.penaltyPlayed = true;
-        const drawer = room!.players.find(player => player.id === room!.drawer)!;
-        this.store.logModeration(room!.code, 'unanimous-vote', this.io.sockets.sockets.get(drawer.id)?.data.identities[0] ?? drawer.id, 'report-unanimous');
-        this.system(room!, 'Todos reportaron al pintor. ¡Oof!');
-        this.io.to(room!.code).emit('sound:play', 'penalty');
-      }
+      if (this.finishReportedTurn(room!)) return;
       this.broadcast(room!);
     });
     handle('board:cursor', cursorSchema, (cursor, room) => {

@@ -152,6 +152,7 @@
   color: #81738e;
 }
 .footer-spark { font-size: 16px; }
+.footer-flag { display: inline-block; vertical-align: middle; margin-left: 4px; }
 @media (max-width: 650px) {
   .game-grid > .chat-panel { order: 1; }
   .game-grid > .players-panel { order: 2; }
@@ -187,5 +188,16 @@
   }
   .chat-focused .active-round .sound-volume { display: none; }
   .chat-focused .active-round .messages { height: clamp(32px, calc(var(--visual-height, 100dvh) * .09), 56px); }
+}
+.site-header > .brand, .site-header > .header-right { flex-shrink: 0; }
+.site-header > .motd { flex: 1; min-width: 0; max-width: 440px; margin-inline: auto; color: var(--deep); font-size: 13px; font-style: italic; line-height: 1.6; text-align: center; overflow-wrap: anywhere; }
+@media (max-width: 1100px) {
+  .site-header { flex-wrap: wrap; height: auto; min-height: 104px; padding-block: 18px 14px; row-gap: 12px; }
+  .site-header > .motd { order: 3; flex-basis: 100%; max-width: none; font-size: 12px; }
+}
+@media (max-width: 650px) {
+  .site-header { min-height: 83px; padding-block: 16px 12px; row-gap: 10px; column-gap: 8px; }
+  .site-header > .motd { font-size: 11px; }
+  .app-shell:has(.active-round) > .site-header { height: auto; min-height: 58px; padding-block: 10px; row-gap: 6px; }
 }
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}

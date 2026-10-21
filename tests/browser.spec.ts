@@ -166,7 +166,7 @@ test('las pistas aparecen solas para quien adivina y el dibujante conserva la pa
 test('móvil: portada y sala caben en la pantalla, palabras propias y salida', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /Vos dibujá/ })).toBeVisible();
+  await expect(page.locator('.hero-copy h1')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await createRoom(page);
   await page.getByText('+ Agregar las palabras de tu grupo').click();
@@ -219,27 +219,25 @@ test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', a
     expect(await count(page)).toBe(0); expect(await count(guest)).toBe(0);
     await guest.getByRole('button', { name: 'Reportar al pintor', exact: true }).click();
     await expect.poll(() => count(page)).toBe(2); await expect.poll(() => count(guest)).toBe(2);
-    await expect(guest.getByRole('button', { name: 'Pintor reportado' })).toBeDisabled();
+    await expect(guest.getByRole('button', { name: 'Reportar al pintor', exact: true })).toHaveCount(0);
+    await expect(guest.locator('.reveal-banner')).toContainText(word);
     await page.getByRole('button', { name: 'Silenciar sonidos' }).click();
     await expect(page.getByLabel('Volumen de efectos')).toHaveCount(0);
     expect(await page.evaluate(() => (window as unknown as { observedAudio: { stops: number } }).observedAudio.stops)).toBeGreaterThan(0);
-    // Exercise the mute gate with a live server event, independently of its three-second cooldown.
-    await guest.getByLabel('Tu respuesta o mensaje').fill(word);
-    await guest.getByRole('button', { name: 'Enviar mensaje' }).click();
+    // El reporte unánime avanza solo; no hace falta adivinar y no concede puntos.
     await expect(guest.locator('.word-strip strong')).toHaveText(word);
-    await expect.poll(() => count(guest)).toBe(3);
+    expect(await count(guest)).toBe(2);
+    await expect(guest.locator('.player > div > span')).toHaveText(['0 puntos', '0 puntos']);
     expect(await count(page)).toBe(2);
     await expect(guest.locator('.word-choices button').first()).toBeVisible({ timeout: 10000 });
     const next = guest.locator('.word-choices button').first(); const finalWord = (await next.innerText()).trim(); await next.click();
-    await page.getByRole('button', { name: 'Reportar al pintor', exact: true }).click();
-    await expect.poll(() => count(guest)).toBe(5);
-    expect(await count(page)).toBe(2);
+    // Un acierto en el siguiente turno sigue reproduciendo success.mp3.
     await page.getByLabel('Tu respuesta o mensaje').fill(finalWord);
     await page.getByRole('button', { name: 'Enviar mensaje' }).click();
-    await expect.poll(() => count(guest)).toBe(6); // Final acierto, todavía sin fanfarria.
+    await expect.poll(() => count(guest)).toBe(3); // Final acierto, todavía sin fanfarria.
     await expect(guest.locator('.winner')).toHaveCount(0);
     await expect(guest.locator('.winner')).toBeVisible({ timeout: 10000 });
-    await expect.poll(() => count(guest)).toBe(7); // Una sola fanfarria al mostrar al ganador.
+    await expect.poll(() => count(guest)).toBe(4); // Una sola fanfarria al mostrar al ganador.
     expect(await count(page)).toBe(2); // El jugador silenciado tampoco oye el final.
     await page.getByRole('button', { name: 'Activar sonidos' }).click();
     await expect(page.getByRole('button', { name: 'Silenciar sonidos' })).toBeEnabled();
@@ -247,9 +245,9 @@ test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', a
     await guest.getByLabel('Tu respuesta o mensaje').fill('gg tropa');
     await guest.getByRole('button', { name: 'Enviar mensaje' }).click();
     await expect(page.getByText('gg tropa', { exact: true })).toBeVisible();
-    expect(await count(guest)).toBe(7); // Actualizar el chat no repite el audio.
+    expect(await count(guest)).toBe(4); // Actualizar el chat no repite el audio.
     await page.getByRole('button', { name: '¡Sale la revancha!' }).click();
     await expect(page.locator('.word-choices button').first()).toBeVisible();
-    expect(await count(guest)).toBe(7);
+    expect(await count(guest)).toBe(4);
   } finally { await context.close(); }
 });
