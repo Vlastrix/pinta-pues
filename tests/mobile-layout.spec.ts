@@ -5,12 +5,32 @@ test('móvil: adivinar junto al dibujo, chat sin saltos y herramientas al cambia
   await page.getByLabel('¿Cómo te dice la tropa?').fill('Pintor');
   await page.getByRole('button', { name: '¡Armemos la sala!' }).click();
   const code = await page.locator('.room-heading h1>span').innerText();
+  await expect(page.locator('.site-header')).toHaveClass(/in-room/);
+  await expect(page.locator('.site-header')).toHaveCSS('height', '64px');
+  const roster = page.locator('.players-panel');
+  await expect(roster.locator('.room-heading h1 > span')).toHaveText(code);
+  await expect(roster.getByLabel('1 de 12 jugadores')).toBeVisible();
+  await expect(roster.getByRole('button', { name: 'Invitar amigos', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Invitar amigos', exact: true })).toHaveCount(1);
+  for (const width of [1440, 1024, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const invite = (await roster.getByRole('button', { name: 'Invitar amigos', exact: true }).boundingBox())!;
+    const panel = (await roster.boundingBox())!;
+    expect(invite.x).toBeGreaterThan(panel.x); expect(invite.x + invite.width).toBeLessThan(panel.x + panel.width);
+  }
+  await roster.screenshot({ path: 'test-results/room-roster-mobile.png' });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.locator('.game-grid').screenshot({ path: 'test-results/room-roster-desktop.png' });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const phone = await context.newPage();
   try {
     await phone.goto(`/?sala=${code}`);
     await phone.getByLabel('¿Cómo te dice la tropa?').fill('Celular');
     await phone.getByRole('button', { name: 'Entrar a la sala' }).click();
+    await expect(phone.locator('.site-header')).toHaveClass(/in-room/);
+    expect((await phone.locator('.site-header').boundingBox())!.height).toBeLessThan(75);
+    await phone.locator('.site-header').screenshot({ path: 'test-results/room-header-mobile.png' });
     await expect(page.getByRole('button', { name: '¡A pintar, pues!' })).toBeEnabled();
     await page.getByRole('button', { name: '¡A pintar, pues!' }).click();
     const choice = page.locator('.word-choices button').first();

@@ -8,7 +8,7 @@ import { WindowLimiter } from './security.js';
 import type { BadgeId } from '../shared/badges.js';
 import { chatEasterEgg, creatorPrank, startEasterEgg } from './easterEggs.js';
 import { SOUNDBOARD_CLIPS, type SoundboardEvent } from '../shared/soundboard.js';
-import { finalGuessWindow, followingGuessPoints, painterPoints } from './scoring.js';
+import { finalGuessWindow, firstGuessPoints, followingGuessPoints, painterPoints } from './scoring.js';
 
 type BadgeStats = { guesses: number; opportunities: number; roundGuesses: number; roundOpportunities: number; fullRound: boolean; silentRound: boolean; misunderstood: boolean };
 
@@ -21,7 +21,7 @@ type Room = {
   hint: string; hintTimer?: ReturnType<typeof setTimeout>;
   banned: Set<string>; completedGames: number; visibility: RoomView['visibility'];
   badgeStats: Map<string, BadgeStats>; turnGuesses: number;
-  turnDuration: number; finalWindow: number; turnGuessers: Set<string>;
+  turnDuration: number; finalWindow: number; turnGuessers: Set<string>; duel: boolean;
   hintPlan: ReturnType<typeof hintSteps>; hintIndex: number;
 };
 const nameSchema = z.string().trim().min(2, 'Tu apodo necesita al menos 2 letras.').max(20);
@@ -145,6 +145,7 @@ export class Game {
     room.turnGuesses = 0;
     room.finalWindow = 0;
     room.turnGuessers = new Set(room.players.filter(player => player.id !== room.drawer).map(player => player.id));
+    room.duel = room.turnGuessers.size === 1;
     for (const player of room.players) if (player.id !== room.drawer) {
       const stats = this.badgeStats(room, player.id); stats.opportunities++; stats.roundOpportunities++;
     }
@@ -161,7 +162,7 @@ export class Game {
   private reveal(room: Room) {
     if (room.phase !== 'drawing') return;
     const drawer = room.players.find(player => player.id === room.drawer);
-    if (drawer) drawer.score += painterPoints(room.turnGuesses, room.turnGuessers.size);
+    if (drawer) drawer.score += painterPoints(room.turnGuesses, room.turnGuessers.size, room.duel);
     if (!room.penaltyPlayed && Date.now() >= room.deadline && room.turnGuesses === 0 && room.actions.length > 0
       && room.players.some(player => player.id !== room.drawer && this.playerSocket(player.id)?.connected)) {
       this.badgeStats(room, room.drawer!).misunderstood = true;
@@ -281,7 +282,7 @@ export class Game {
         reporters: new Set(), lastReportAt: 0, penaltyPlayed: false,
         hint: '',
         banned: new Set(), completedGames: 0, visibility, badgeStats: new Map(), turnGuesses: 0,
-        turnDuration: 0, finalWindow: 0, turnGuessers: new Set(), hintPlan: [], hintIndex: 0,
+        turnDuration: 0, finalWindow: 0, turnGuessers: new Set(), duel: false, hintPlan: [], hintIndex: 0,
       };
       this.rooms.set(code, room); this.membership.set(socket.id, code); socket.join(code);
       this.system(room, `${name} creó la sala. ¡Que entre la tropa!`); this.broadcast(room);
@@ -386,10 +387,10 @@ export class Game {
       room!.players.forEach(player => { player.score = 0; player.guessed = false; });
       room!.badgeStats.clear();
       for (const player of room!.players) this.badgeStats(room!, player.id).fullRound = true;
-      if (room!.completedGames === 3) this.system(room!, '¿No que era la última, pues? —La tropa, tres revanchas después.');
+      if (room!.completedGames === 3) this.system(room!, '¿No que era la última, pues? —La tropa, tres revanchas después.', 'prank');
       const flavor = startEasterEgg();
       if (flavor) {
-        this.system(room!, flavor);
+        this.system(room!, flavor, 'prank');
         this.io.to(room!.code).emit('game:flavor', flavor);
       }
       room!.queue = Array.from({ length: room!.settings.rounds }, (_, index) => room!.players.map(player => ({ id: player.id, round: index + 1 }))).flat();
@@ -405,10 +406,10 @@ export class Game {
       const player = room!.players.find(player => player.id === socket.id)!;
       if (player.muted && !(room!.phase === 'drawing' && socket.id !== room!.drawer && !player.guessed && normalize(text) === normalize(room!.word))) throw new Error('Tu chat está silenciado. Solo puedes enviar la respuesta correcta.');
       const postMessage = () => {
-        const response = chatEasterEgg(text, room!.phase === 'drawing' ? room!.word : undefined);
+        const response = chatEasterEgg(text, room!.phase === 'drawing' ? room!.word : undefined, Math.random, player.name);
         if (response) {
-          if (/\berror\s+de\s+capa\s*8\b/i.test(text)) room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
-          this.system(room!, response);
+          if (/\berror\s+de\s+capa\s*8\b|\bvladi\s+god\b/i.test(text)) room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
+          this.system(room!, response, 'prank');
         } else room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
         if (creatorPrank(text)) {
           socket.volatile.emit('game:creator-prank', { code: room!.code });
@@ -431,7 +432,7 @@ export class Game {
           player.guessed = true;
           room!.turnGuesses++;
           const stats = this.badgeStats(room!, player.id); stats.guesses++; stats.roundGuesses++;
-          const points = first ? 60 : followingGuessPoints(remaining, room!.finalWindow);
+          const points = first ? firstGuessPoints(remaining, room!.turnDuration, room!.duel) : followingGuessPoints(remaining, room!.finalWindow);
           player.score += points;
           // Personal, ephemeral feedback: don't broadcast or replay it on recovery.
           socket.volatile.emit('game:guessed', { id: randomUUID(), code: room!.code, points });

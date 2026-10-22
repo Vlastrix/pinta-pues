@@ -24,10 +24,19 @@ test('bandera dentro del lienzo: posición responsive, reporte confirmado y paso
       await expect(guest.locator('.report-row')).toHaveCount(0);
     }
     await guest.locator('.board-surface').screenshot({ path: 'test-results/report-canvas-mobile.png' });
+    await button.hover();
+    await expect(button.locator('.report-icon')).toHaveCSS('animation-name', 'report-wave');
+    await guest.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(button.locator('.report-icon')).toHaveCSS('animation-name', 'none');
+    await guest.emulateMedia({ reducedMotion: 'no-preference' });
     await button.click();
     const reported = guest.getByRole('button', { name: 'Pintor reportado', exact: true });
     await expect(reported).toBeDisabled(); await expect(reported).toHaveAttribute('aria-pressed', 'true');
     await expect(reported.locator('.report-count')).toHaveText('1/2');
+    await expect(reported).toHaveCSS('animation-name', 'report-confirm');
+    await expect(reported.locator('.report-icon')).toHaveCSS('animation-name', 'report-check');
+    await guest.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(reported).toHaveCSS('animation-name', 'none');
     await guest.evaluate(() => document.documentElement.dataset.theme = 'dark');
     await guest.locator('.board-surface').screenshot({ path: 'test-results/report-canvas-dark.png' });
     await page.waitForTimeout(3100); // El servidor exige 3 s entre reportes de la sala.

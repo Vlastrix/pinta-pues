@@ -244,6 +244,13 @@ test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', a
     await expect.poll(() => count(guest)).toBe(2); // Final acierto, todavía sin fanfarria.
     await expect(guest.locator('.winner')).toHaveCount(0);
     await expect(guest.locator('.winner')).toBeVisible({ timeout: 10000 });
+    await expect(guest.locator('.winner-pencil-float')).toHaveCSS('animation-name', 'winner-float');
+    await guest.setViewportSize({ width: 320, height: 844 });
+    await expect(guest.locator('.winner-emblem')).toHaveCSS('width', '120px');
+    await guest.evaluate(() => document.documentElement.dataset.theme = 'dark');
+    await guest.locator('.winner').screenshot({ path: 'test-results/winner-emblem-mobile.png' });
+    await guest.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(guest.locator('.winner-pencil-float')).toHaveCSS('animation-name', 'none');
     await expect.poll(() => count(guest)).toBe(3); // Una sola fanfarria al mostrar al ganador.
     expect(await count(page)).toBe(2); // El jugador silenciado tampoco oye el final.
     await page.getByRole('button', { name: 'Abrir efectos', exact: true }).click();

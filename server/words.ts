@@ -43,7 +43,7 @@ export const seeds: Record<string, string[]> = {
     'aguayo', 'cholita luchadora', 'chullo', 'quena', 'zampoña',
     'wiphala', 'diablada', 'morenada', 'tinku', 'tobas',
     'salar de Uyuni', 'lago Titicaca', 'Puerta del Sol', 'Cerro Rico', 'Cristo de la Concordia',
-    'mototaxi', 'minibús', 'cebra paceña', 'alasita', 'chuspa',
+    'mototaxi', 'minibús', 'cerveza paseña', 'alasita', 'chuspa',
     'sombrero de chola', 'poncho', 'quinua', 'chuño', 'tunta',
     'silpancho', 'pique macho', 'majadito', 'sonso', 'cuñapé',
     'tucumana', 'sopa de maní', 'sajta de pollo', 'mocochinchi', 'somó',

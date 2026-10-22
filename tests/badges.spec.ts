@@ -18,19 +18,18 @@ test('insignias nuevas aparecen en sala, ranking y mi cuenta sin recargar', asyn
     const next = guest.locator('.word-choices button').first(); await expect(next).toBeVisible({ timeout: 10000 }); await next.click();
     await page.getByRole('button', { name: 'Reportar al pintor', exact: true }).click();
     const artist = page.locator('.player').filter({ hasText: 'Artista' });
-    await expect(artist.locator('.badge-icon')).toHaveCount(2, { timeout: 10000 });
-    // Both players earned 60, so a tie must not award last place.
-    await expect(artist.getByRole('button', { name: 'Insignia: Último de la tropa', exact: true })).toHaveCount(0);
+    await expect(artist.locator('.badge-icon')).toHaveCount(3, { timeout: 10000 });
+    await expect(artist.getByRole('button', { name: 'Insignia: Último de la tropa', exact: true })).toBeVisible();
     await artist.getByRole('button', { name: 'Insignia: Cero aciertos', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'Detalle de insignia' })).toContainText('sin adivinar ningún dibujo');
     await page.getByRole('button', { name: 'Cerrar insignia' }).click();
     await page.getByRole('button', { name: 'Salir de la sala', exact: true }).click();
-    await expect(page.locator('.leaderboard-you .badge-icon')).toHaveCount(2);
+    await expect(page.locator('.leaderboard-you .badge-icon')).toHaveCount(3);
     await page.getByRole('button', { name: 'Mi cuenta', exact: true }).click();
-    await expect(page.getByRole('region', { name: 'Mis insignias' })).toContainText('2/4');
-    await expect(page.locator('.badge-earned')).toHaveCount(2);
+    await expect(page.getByRole('region', { name: 'Mis insignias' })).toContainText('3/4');
+    await expect(page.locator('.badge-earned')).toHaveCount(3);
     await page.getByRole('button', { name: 'Cerrar cuenta' }).click();
     await page.getByRole('button', { name: '¡Armemos la sala!' }).click();
-    await expect(page.locator('.player .badge-icon')).toHaveCount(2);
+    await expect(page.locator('.player .badge-icon')).toHaveCount(3);
   } finally { await context.close(); }
 });

@@ -111,6 +111,50 @@ test('pintor: aciertos parciales, ingresos y salidas no inflan la recompensa', a
   } finally { await f.close(); }
 });
 
+test('duelo completo: velocidades distintas rompen el empate, eventos y resultados coinciden', { timeout: 10000 }, async t => {
+  let clock = Date.now(); t.mock.method(Date, 'now', () => clock);
+  const f = await fixture({ choice: 30000, reveal: 20, turn: 100000 });
+  try {
+    const host = await f.connect(), guest = await f.connect();
+    const rewards = new Map<Socket, number[]>([[host, []], [guest, []]]);
+    for (const socket of [host, guest]) socket.on('game:guessed', event => rewards.get(socket)!.push(event.points));
+    await f.emit(host, 'room:create', { name: 'Pintor' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { code, name: 'Rapido' });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 100, categories: ['Bolivia'] });
+    await f.emit(host, 'game:start'); await f.emit(host, 'game:choose', { word: f.state(host).choices![0] });
+    clock += 25000;
+    await f.emit(guest, 'chat:send', { text: f.state(host).word });
+    await f.wait(guest, state => state.phase === 'choosing' && Boolean(state.choices));
+    assert.equal(f.state(guest).players.find(player => player.id === host.id)!.score, 30);
+    assert.equal(f.state(guest).players.find(player => player.id === guest.id)!.score, 53);
+    await f.emit(guest, 'game:choose', { word: f.state(guest).choices![0] });
+    clock += 75000;
+    await f.emit(host, 'chat:send', { text: f.state(guest).word });
+    const final = await f.wait(host, state => state.phase === 'finished');
+    assert.equal(final.players.find(player => player.id === host.id)!.score, 68);
+    assert.equal(final.players.find(player => player.id === guest.id)!.score, 83);
+    assert.deepEqual(rewards.get(guest), [53]); assert.deepEqual(rewards.get(host), [38]);
+    const saved = f.app.store.db.prepare('SELECT scores FROM results').get() as { scores: string };
+    assert.deepEqual(JSON.parse(saved.scores), [{ name: 'Pintor', score: 68 }, { name: 'Rapido', score: 83 }]);
+  } finally { await f.close(); }
+});
+
+test('duelo: ingresar o salir a mitad del turno no cambia su regla de puntuación', async () => {
+  const f = await fixture({ choice: 30000, reveal: 1000, turn: 30000 });
+  try {
+    const host = await f.connect(), guest = await f.connect(), late = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Pintor' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { code, name: 'Uno' });
+    await f.emit(host, 'game:start'); const word = f.state(host).choices![0]; await f.emit(host, 'game:choose', { word });
+    await f.emit(late, 'room:join', { code, name: 'Tarde' });
+    const room = f.app.game.rooms.get(code)!; assert.equal(room.duel, true);
+    await f.emit(guest, 'chat:send', { text: word });
+    await f.emit(late, 'chat:send', { text: word });
+    await f.wait(host, state => state.phase === 'reveal');
+    assert.equal(f.state(host).players.find(player => player.id === host.id)!.score, 30);
+  } finally { await f.close(); }
+});
+
 test('ventana acortada: pistas acumulativas hasta el límite, sin reiniciarse con más aciertos', async () => {
   const f = await fixture({ choice: 30000, reveal: 1000, turn: 2000 });
   try {
@@ -333,8 +377,9 @@ test('sala real: privacidad de la palabra, validación, dibujo y puntos', async 
       assert.equal(result.error, 'Escribe una pista antes de tocar el lienzo.');
     }
     assert.equal((await f.emit(host, 'board:action', { ...stroke, tool: 'text', text: 'S A L T E N A' })).ok, false);
-    const caught = await f.wait(guest, state => state.messages.some(message => message.kind === 'prank'));
-    assert.equal(caught.messages.find(message => message.kind === 'prank')!.text, '¡Vladi intentó agarrar un camino fácil escribiendo la respuesta! Acá se dibuja, pues. 👀');
+    const notice = '¡Vladi intentó agarrar un camino fácil escribiendo la respuesta! Acá se dibuja, pues. 👀';
+    const caught = await f.wait(guest, state => state.messages.some(message => message.text === notice));
+    assert.equal(caught.messages.find(message => message.text === notice)!.kind, 'prank');
     assert.equal(caught.actions.length, 0);
     assert.equal(JSON.stringify(caught).includes('salteña'), false);
     assert.ok(caught.players.every(player => player.score === 0));
@@ -378,7 +423,7 @@ test('partida completa: alterna dibujantes, finaliza, persiste resultados y admi
     await f.wait(host, state => state.phase === 'finished');
     const result = f.app.store.db.prepare('SELECT scores FROM results').get() as { scores: string };
     assert.equal(JSON.parse(result.scores).length, 2);
-    assert.ok(JSON.parse(result.scores).every((player: { score: number }) => player.score === 120));
+    assert.ok(JSON.parse(result.scores).every((player: { score: number }) => player.score >= 89 && player.score <= 90));
     await f.emit(host, 'game:start');
     assert.equal(f.state(host).phase, 'choosing');
     assert.ok(f.state(host).players.every(player => player.score === 0));

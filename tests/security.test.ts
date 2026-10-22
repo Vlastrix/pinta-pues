@@ -141,8 +141,7 @@ test('insignias: hechos reales, sin duplicados, persistentes en cuenta, ranking 
     assert.deepEqual((await jar.request('/api/session')).data.user.badges, earned);
     assert.deepEqual((await jar.request('/api/leaderboard')).data[0].badges, earned);
     assert.deepEqual(f.state(host).players[0].badges, earned);
-    // With two players, one correct guess now gives both painter and guesser 60.
-    // Use a third player to create a real last place rather than a tie.
+    // Exercise last place in a group with a mix of correct and missed guesses.
     const third = await f.connect(); await f.emit(third, 'room:join', { name: 'Tercero', code });
     await f.emit(host, 'game:start');
     const word = f.state(host).choices![0]; await f.emit(host, 'game:choose', { word });

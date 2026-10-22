@@ -20,6 +20,21 @@ test('broma del creador: solo al remitente, tres cierres, teclado y móvil', asy
   try {
     await guest.goto(`/?sala=${code}`); await guest.getByLabel('¿Cómo te dice la tropa?').fill('Fresco');
     await guest.getByRole('button', { name: 'Entrar a la sala' }).click();
+    for (const [phrase, expected] of [
+      ['/protocolo3', 'BT-7274 · Protocolo 3: proteger a la tropa.'],
+      ['Error de CAPA 8', 'Se detectó un problema entre la silla y la pantalla'],
+      ['/momazos', /^Momazos Diego · /],
+      ['VlAdI GOD', 'Confirmo y reafirmo lo que dijo Fresco.'],
+    ] as const) {
+      await guest.getByLabel('Tu respuesta o mensaje').fill(phrase); await guest.getByRole('button', { name: 'Enviar mensaje' }).click();
+      for (const tab of [page, guest]) {
+        const notice = tab.locator('.message.prank strong').last();
+        await expect(notice).toHaveText(expected);
+        await expect(notice).toHaveCSS('font-weight', '800');
+      }
+      await expect(guest.locator('.creator-prank')).toHaveCount(0);
+      await guest.waitForTimeout(360);
+    }
     let audible = 0;
     for (const phrase of ['vLaDi FrEsCo', 'VLADI GRAN PVTA', 'Vladi puto']) {
       if (phrase === 'Vladi puto') {

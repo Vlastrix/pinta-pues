@@ -34,3 +34,12 @@ test('inicio filosófico: probabilidad del 20% sin cambiar el juego', () => {
   assert.equal(startEasterEgg(() => .2), null);
   assert.equal(startEasterEgg(() => .999), null);
 });
+
+test('vladi god: mayúsculas, espacios, apodo real y sin revelar la palabra', () => {
+  const praise = (text: string, hidden?: string, name = 'Piloto') => chatEasterEgg(text, hidden, () => 0, name);
+  for (const text of ['vladi god', 'VLADI GOD', 'jaja VlAdI   GoD!']) assert.equal(praise(text), 'Confirmo y reafirmo lo que dijo Piloto.');
+  assert.equal(praise('Vladi godzilla'), null);
+  assert.equal(praise('otrovladi god'), null);
+  assert.equal(praise('vladi god', 'reafirmo'), null);
+  assert.equal(praise('vladi god', 'conejo', 'Conejo'), null);
+});

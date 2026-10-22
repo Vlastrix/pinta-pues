@@ -5,7 +5,7 @@ export function creatorPrank(text: string): boolean {
   return /\bvladi\s+(?:fresco|gran\s+pvta|puto)\b/i.test(text);
 }
 
-export function chatEasterEgg(text: string, hiddenWord?: string, random = Math.random): string | null {
+export function chatEasterEgg(text: string, hiddenWord?: string, random = Math.random, senderName = 'la tropa'): string | null {
   const safe = (message: string) => !hiddenWord || !normalize(message).includes(normalize(hiddenWord));
   let message: string | undefined;
   const command = text.trim().toLowerCase();
@@ -14,6 +14,7 @@ export function chatEasterEgg(text: string, hiddenWord?: string, random = Math.r
     const options = motdMessages.map(phrase => `Momazos Diego · ${phrase}`).filter(safe);
     if (options.length) message = options[Math.floor(random() * options.length)];
   } else if (/\berror\s+de\s+capa\s*8\b/i.test(text)) message = 'Se detectó un problema entre la silla y la pantalla';
+  else if (/\bvladi\s+god\b/i.test(text)) message = `Confirmo y reafirmo lo que dijo ${senderName}.`;
   return message && safe(message) ? message : null;
 }
 

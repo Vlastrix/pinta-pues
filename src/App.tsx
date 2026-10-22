@@ -6,6 +6,7 @@ import { AVATAR_PATTERN, DEFAULT_AVATAR, MAX_BRUSH_SIZE } from '../shared/types'
 import { Canvas } from './Canvas';
 import { BrushSizeControl } from './BrushSizeControl';
 import { GuessCelebration } from './GuessCelebration';
+import { WinnerEmblem } from './WinnerEmblem';
 import { CreatorPrank } from './CreatorPrank';
 import type { GuessRewardEvent } from '../shared/types';
 import { SoundPlayer } from './sound';
@@ -308,7 +309,7 @@ export default function App() {
   }
   return <div className={`app-shell${saltenaMode ? ' saltena-mode' : ''}`}>
     {creatorPrankOpen && <CreatorPrank onClose={() => setCreatorPrankOpen(false)} />}
-    <header className="site-header">
+    <header className={`site-header${room ? ' in-room' : ''}`}>
       <a className="brand" href="/" onClick={event => {
         event.preventDefault();
         if (++logoClicks.current === 7) {
@@ -342,25 +343,25 @@ export default function App() {
       <section className="how-it-works"><div><span>01</span><p><strong>Juntá a la tropa</strong>Creá una sala y pasá el enlace.</p></div><div><span>02</span><p><strong>Dibujá lo que te toque</strong>¿Algo filosófico? ¿Goku? Vos podés.</p></div><div><span>03</span><p><strong>Adiviná antes que todos</strong>Más rápido, más puntos. Así de fácil.</p></div></section>
       <Leaderboard key={account ? `${account.id}:${account.name}:${account.avatar}` : 'guest'} />
     </main> : <main className={`game-page ${chatFocused ? 'chat-focused' : ''}`}>
-      <div className={`room-heading ${!editable ? 'active-game-heading' : ''}`}><div><span className="eyebrow">{landingMessages.roomTagline}</span><h1>Sala <span>{room.code}</span></h1></div>
-        {!editable && <div className="turn-header">
-          <div className="board-top"><div><span className="status-dot" /><strong>{room.phase === 'choosing' ? isDrawer ? 'Elegí tu palabra' : 'El dibujante está eligiendo' : room.phase === 'reveal' ? '¡Así era, pues!' : isDrawer ? 'Te toca dibujar' : `${room.players.find(p => p.id === room.drawer)?.name} está dibujando`}</strong></div><span className={`timer ${seconds <= 10 ? 'urgent' : ''}`}>{seconds}s</span></div>
-          <div className="word-strip"><span>{room.word ? room.phase === 'reveal' ? 'LA PALABRA ERA' : 'TU PALABRA' : 'ADIVINÁ LA PALABRA'}</span><strong className={!room.word ? 'hint' : ''}>{room.word ?? (room.phase === 'choosing' ? '• • •' : room.hint)}</strong></div>
-        </div>}
-        <div className="room-meta"><span><Users size={17} />{room.players.length}/12</span><button className="button secondary" onClick={invite}>Invitar amigos <Plus size={17} /></button></div>
-      </div>
       <div className={`game-grid ${!editable ? 'active-round' : ''} ${drawing ? 'is-drawing' : 'is-guessing'}`}>
-        <aside className="players-panel panel"><div className="panel-heading"><Trophy size={17} /><h2>La tropa</h2><span>{room.players.length}</span></div>
+        <aside className="players-panel panel">
+          <div className="room-heading players-room-heading"><span className="eyebrow">{landingMessages.roomTagline}</span><h1>Sala <span>{room.code}</span></h1><button className="button secondary players-invite" onClick={invite}>Invitar amigos <Plus size={17} /></button></div>
+          <div className="panel-heading"><Trophy size={17} /><h2>La tropa</h2><span className="players-count" aria-label={`${room.players.length} de 12 jugadores`}><Users size={14} aria-hidden="true" />{room.players.length}/12</span></div>
           <div className="player-list">{[...room.players].sort((a, b) => b.score - a.score).map((item, index) => <div className={`player ${item.id === room.drawer ? 'active' : ''} ${item.guessed ? 'guessed' : ''}`} key={item.id}>
             <span className="player-rank">{index + 1}</span><span className="avatar player-avatar"><AvatarImage seed={item.avatar} alt={`Avatar de ${item.name}`} /></span><div><strong>{item.name}{item.id === room.you && <small> (vos)</small>}</strong><span>{item.score} puntos{item.connected === false && ' · Reconectando…'}{item.muted && ' · Chat silenciado'}</span><Badges ids={item.badges} /></div><span className="player-indicator">{item.guessed ? <Check size={16} /> : item.id === room.drawer ? <Pencil size={16} /> : item.id === room.host ? <Crown size={16} /> : null}</span>
             {isHost && item.id !== room.you && <button className="player-menu" aria-label={`Moderar a ${item.name}`} title={`Moderar a ${item.name}`} onClick={() => setModeratingId(item.id)}><MoreHorizontal size={16} /></button>}
           </div>)}</div><div className="players-note">{editable ? 'Pasá el enlace al grupo. Las risas se multiplican.' : `Ronda ${room.round} de ${room.settings.rounds}`}<span>✳</span></div>
         </aside>
         <section className="board-column">
+        {!editable && <div className="turn-header">
+          <div className="board-top"><div><span className="status-dot" /><strong>{room.phase === 'choosing' ? isDrawer ? 'Elegí tu palabra' : 'El dibujante está eligiendo' : room.phase === 'reveal' ? '¡Así era, pues!' : isDrawer ? 'Te toca dibujar' : `${room.players.find(p => p.id === room.drawer)?.name} está dibujando`}</strong></div><span className={`timer ${seconds <= 10 ? 'urgent' : ''}`}>{seconds}s</span></div>
+          <div className="word-strip"><span>{room.word ? room.phase === 'reveal' ? 'LA PALABRA ERA' : 'TU PALABRA' : 'ADIVINÁ LA PALABRA'}</span><strong className={!room.word ? 'hint' : ''}>{room.word ?? (room.phase === 'choosing' ? '• • •' : room.hint)}</strong></div>
+        </div>}
+
           {editable && <div className="board-top"><div><span className="status-dot" /><strong>{room.phase === 'finished' ? '¡Tenemos ganador!' : 'Calentando los pinceles'}</strong></div></div>}
           <div className="board-surface">
             {editable ? <div className="lobby">
-              {room.phase === 'finished' ? <div className="winner"><Trophy size={42} /><h2>¡{[...room.players].sort((a, b) => b.score - a.score)[0].name} se la lleva!</h2><p>Los puntos están a la izquierda. Las excusas van al chat.</p></div> : <><div className="lobby-doodle"><Doodle small /></div><h2>Que no falte nadie, pues.</h2><p>Comparte este enlace <button className="inline-code" onClick={invite}>{room.code} <Copy size={13} /></button> y prepará tu mejor peor dibujo.</p></>}
+              {room.phase === 'finished' ? <div className="winner"><WinnerEmblem /><h2>¡{[...room.players].sort((a, b) => b.score - a.score)[0].name} se la lleva!</h2><p>Los puntos están a la izquierda. Las excusas van al chat.</p></div> : <><div className="lobby-doodle"><Doodle small /></div><h2>Que no falte nadie, pues.</h2><p>Comparte este enlace <button className="inline-code" onClick={invite}>{room.code} <Copy size={13} /></button> y prepará tu mejor peor dibujo.</p></>}
               <label className="room-visibility">Visibilidad<select aria-label="Visibilidad de la sala" disabled={!isHost} value={room.visibility} onChange={event => emit('room:visibility', { visibility: event.target.value })}><option value="private">Privada · Solo con código o enlace</option><option value="public">Pública · Cualquiera puede unirse</option></select></label>
               <div className="settings-grid"><label>Rondas<select aria-label="Rondas" disabled={!isHost} value={room.settings.rounds} onChange={e => settings({ rounds: Number(e.target.value) })}>{[1, 2, 3, 4, 5].map(value => <option key={value} value={value}>{value} {value === 1 ? 'ronda' : 'rondas'}</option>)}</select></label><label>Tiempo por turno<select aria-label="Tiempo por turno" disabled={!isHost} value={room.settings.duration} onChange={e => settings({ duration: Number(e.target.value) })}>{[30, 60, 80, 100, 120, 180].map(value => <option key={value} value={value}>{value} segundos</option>)}</select></label></div>
               <div className="category-picker"><span>Categorías de la partida</span><div>{room.availableCategories.map(category => <button key={category} className={room.settings.categories.includes(category) ? 'selected' : ''} disabled={!isHost} onClick={() => { const categories = room.settings.categories.includes(category) ? room.settings.categories.filter(value => value !== category) : [...room.settings.categories, category]; if (categories.length) settings({ categories }); }} >{room.settings.categories.includes(category) && <Check size={13} />}{category}{category === 'Personalizadas' ? ` (${room.customWordCount})` : ''}</button>)}</div></div>
@@ -370,7 +371,7 @@ export default function App() {
             </div> : <><Canvas actions={room.actions} enabled={drawing} tool={tool} color={color} size={size} onAction={sendAction} onSizeChange={changeSize}
               remoteCursor={room.phase === 'drawing' && remoteCursor?.drawer === room.drawer ? remoteCursor.cursor : null} onCursor={sendCursor} />
               {guessReward && <GuessCelebration key={guessReward.id} points={guessReward.points} />}
-              {room.phase === 'drawing' && !isDrawer && <button className={`report-button board-report${room.reported ? ' is-reported' : ''}`} aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} aria-pressed={room.reported} disabled={!connected || room.reported} title={`${room.reported ? 'Pintor reportado' : 'Reportar al pintor'} (${room.reportCount}/${room.reportRequired}). Si todos reportan, se revela la palabra y pasa el turno. Los puntos no cambian.`} onClick={() => emit('game:report', {})}>{room.reported ? <Check size={20} /> : <FlagTriangleRight size={20} />}{room.reportCount > 0 && <span className="report-count" aria-hidden="true">{room.reportCount}/{room.reportRequired}</span>}</button>}
+              {room.phase === 'drawing' && !isDrawer && <button className={`report-button board-report${room.reported ? ' is-reported' : ''}`} aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} aria-pressed={room.reported} disabled={!connected || room.reported} title={`${room.reported ? 'Pintor reportado' : 'Reportar al pintor'} (${room.reportCount}/${room.reportRequired}). Si todos reportan, se revela la palabra y pasa el turno. Los puntos no cambian.`} onClick={() => emit('game:report', {})}>{room.reported ? <Check className="report-icon" size={20} /> : <FlagTriangleRight className="report-icon" size={20} />}{room.reportCount > 0 && <span className="report-count" aria-hidden="true">{room.reportCount}/{room.reportRequired}</span>}</button>}
               {room.phase === 'choosing' && <div className="board-overlay"><span className="choice-icon"><Pencil size={32} /></span><h2>{isDrawer ? '¿Qué vas a dibujar?' : 'Se está cocinando el dibujo…'}</h2><p>{isDrawer ? 'Elegí una. La tropa confía en tu talento.' : 'En un ratito empieza el turno.'}</p>{room.choices && <div className="word-choices">{room.choices.map(word => <button className="button secondary" key={word} onClick={() => emit('game:choose', { word })}>{word}</button>)}</div>}</div>}
               {room.phase === 'reveal' && <div className="reveal-banner">
                 <span className="reveal-icon"><Sparkles size={30} /></span>

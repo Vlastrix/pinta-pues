@@ -33,7 +33,7 @@ test('ingreso desde móvil durante el dibujo: recibe trazos y puede adivinar con
     await phone.getByLabel('Tu respuesta o mensaje').fill(word);
     await phone.getByRole('button', { name: 'Enviar mensaje' }).tap();
     await expect(phone.locator('.player').filter({ hasText: 'Recién llegado' })).toHaveClass(/guessed/);
-    await expect(phone.locator('.player').filter({ hasText: 'Recién llegado' })).not.toContainText('0 puntos');
+    await expect(phone.locator('.player').filter({ hasText: 'Recién llegado' }).locator('div > span')).toHaveText('60 puntos');
     await expect(page.getByRole('button', { name: 'Pincel', exact: true })).toBeEnabled();
     expect(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   } finally { await phoneContext.close(); await context.close(); }
