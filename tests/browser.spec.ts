@@ -196,10 +196,8 @@ test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', a
     };
   };
   await page.addInitScript(observeAudio);
-  const successResponse = page.waitForResponse(response => response.url().endsWith('/audio/game/success.mp3'));
   const fanfareResponse = page.waitForResponse(response => response.url().endsWith('/audio/game/success-fanfare-trumpets.mp3'));
   const code = await createRoom(page);
-  expect((await successResponse).ok()).toBe(true);
   expect((await fanfareResponse).ok()).toBe(true);
   await page.getByLabel('Rondas', { exact: true }).selectOption('1');
   const context = await browser.newContext(); await context.addInitScript(observeAudio);
@@ -240,13 +238,13 @@ test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', a
     expect(await count(page)).toBe(2);
     await expect(guest.locator('.word-choices button').first()).toBeVisible({ timeout: 10000 });
     const next = guest.locator('.word-choices button').first(); const finalWord = (await next.innerText()).trim(); await next.click();
-    // Un acierto en el siguiente turno sigue reproduciendo success.mp3.
+    // Only the guesser hears their reaction; this guesser is muted.
     await page.getByLabel('Tu respuesta o mensaje').fill(finalWord);
     await page.getByRole('button', { name: 'Enviar mensaje' }).click();
-    await expect.poll(() => count(guest)).toBe(3); // Final acierto, todavía sin fanfarria.
+    await expect.poll(() => count(guest)).toBe(2); // Final acierto, todavía sin fanfarria.
     await expect(guest.locator('.winner')).toHaveCount(0);
     await expect(guest.locator('.winner')).toBeVisible({ timeout: 10000 });
-    await expect.poll(() => count(guest)).toBe(4); // Una sola fanfarria al mostrar al ganador.
+    await expect.poll(() => count(guest)).toBe(3); // Una sola fanfarria al mostrar al ganador.
     expect(await count(page)).toBe(2); // El jugador silenciado tampoco oye el final.
     await page.getByRole('button', { name: 'Abrir efectos', exact: true }).click();
     await page.getByRole('button', { name: 'Activar sonidos' }).click();
@@ -256,9 +254,9 @@ test('MP3 reales: acierto, final, Steve y Roblox respetan silencio y volumen', a
     await guest.getByLabel('Tu respuesta o mensaje').fill('gg tropa');
     await guest.getByRole('button', { name: 'Enviar mensaje' }).click();
     await expect(page.getByText('gg tropa', { exact: true })).toBeVisible();
-    expect(await count(guest)).toBe(4); // Actualizar el chat no repite el audio.
+    expect(await count(guest)).toBe(3); // Actualizar el chat no repite el audio.
     await page.getByRole('button', { name: '¡Sale la revancha!' }).click();
     await expect(page.locator('.word-choices button').first()).toBeVisible();
-    expect(await count(guest)).toBe(4);
+    expect(await count(guest)).toBe(3);
   } finally { await context.close(); }
 });

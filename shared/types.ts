@@ -20,10 +20,11 @@ export type DrawAction = {
 export const DEFAULT_AVATAR = 'pinta-pues-1';
 export const AVATAR_PATTERN = /^[a-z0-9-]{1,48}$/;
 export type Player = { id: string; name: string; avatar: string; score: number; guessed: boolean; muted: boolean; registered: boolean; connected?: boolean; badges?: BadgeId[] };
-export type Message = { id: string; name: string; senderId?: string; text: string; kind: 'chat' | 'system' | 'correct' };
+export type Message = { id: string; name: string; senderId?: string; text: string; kind: 'chat' | 'system' | 'correct' | 'prank' };
 export type Settings = { rounds: number; duration: number; categories: string[] };
 export type Phase = 'lobby' | 'choosing' | 'drawing' | 'reveal' | 'finished';
 export type SoundEffect = 'report' | 'penalty';
+export type GuessRewardEvent = { id: string; code: string; points: number };
 export type RoomVisibility = 'private' | 'public';
 export type RoomView = {
   code: string; you: string; host: string; players: Player[]; phase: Phase; visibility: RoomVisibility;

@@ -6,8 +6,9 @@ import { Store, normalize } from './store.js';
 import { hintSteps, maskWord } from './hints.js';
 import { WindowLimiter } from './security.js';
 import type { BadgeId } from '../shared/badges.js';
-import { chatEasterEgg, startEasterEgg } from './easterEggs.js';
+import { chatEasterEgg, creatorPrank, startEasterEgg } from './easterEggs.js';
 import { SOUNDBOARD_CLIPS, type SoundboardEvent } from '../shared/soundboard.js';
+import { finalGuessWindow, followingGuessPoints, painterPoints } from './scoring.js';
 
 type BadgeStats = { guesses: number; opportunities: number; roundGuesses: number; roundOpportunities: number; fullRound: boolean; silentRound: boolean; misunderstood: boolean };
 
@@ -20,6 +21,8 @@ type Room = {
   hint: string; hintTimer?: ReturnType<typeof setTimeout>;
   banned: Set<string>; completedGames: number; visibility: RoomView['visibility'];
   badgeStats: Map<string, BadgeStats>; turnGuesses: number;
+  turnDuration: number; finalWindow: number; turnGuessers: Set<string>;
+  hintPlan: ReturnType<typeof hintSteps>; hintIndex: number;
 };
 const nameSchema = z.string().trim().min(2, 'Tu apodo necesita al menos 2 letras.').max(20);
 const avatarSchema = z.string().regex(AVATAR_PATTERN, 'Elige un avatar válido.').default(DEFAULT_AVATAR);
@@ -80,7 +83,8 @@ export class Game {
     clearTimeout(room.timer); clearTimeout(room.hintTimer);
   }
   private scheduleHints(room: Room, duration: number) {
-    const steps = hintSteps(room.word);
+    const steps = room.hintPlan;
+    const previousProgress = room.hintIndex ? steps[room.hintIndex - 1].progress : 0;
     const startedAt = room.deadline - duration;
     const nextHint = (index: number) => {
       const step = steps[index];
@@ -88,11 +92,12 @@ export class Game {
       room.hintTimer = setTimeout(() => {
         if (room.phase !== 'drawing' || Date.now() >= room.deadline) return;
         room.hint = step.hint;
+        room.hintIndex = index + 1;
         this.io.to(room.code).emit('word:hint', room.hint);
         nextHint(index + 1);
-      }, Math.max(0, startedAt + duration * step.progress - Date.now()));
+      }, Math.max(0, startedAt + duration * (step.progress - previousProgress) / (1 - previousProgress) - Date.now()));
     };
-    nextHint(0);
+    nextHint(room.hintIndex);
   }
   private next(room: Room) {
     this.clearTimers(room);
@@ -138,12 +143,16 @@ export class Game {
   }
   private choose(room: Room, word: string) {
     room.turnGuesses = 0;
+    room.finalWindow = 0;
+    room.turnGuessers = new Set(room.players.filter(player => player.id !== room.drawer).map(player => player.id));
     for (const player of room.players) if (player.id !== room.drawer) {
       const stats = this.badgeStats(room, player.id); stats.opportunities++; stats.roundOpportunities++;
     }
     room.word = word; room.used.add(normalize(word)); room.choices = []; room.phase = 'drawing';
     room.hint = maskWord(word);
+    room.hintPlan = hintSteps(word); room.hintIndex = 0;
     const duration = this.timing.turn ?? room.settings.duration * 1000;
+    room.turnDuration = duration;
     this.schedule(room, duration, () => this.reveal(room));
     this.scheduleHints(room, duration);
     this.system(room, `Le toca dibujar a ${room.players.find(player => player.id === room.drawer)?.name}.`);
@@ -151,6 +160,8 @@ export class Game {
   }
   private reveal(room: Room) {
     if (room.phase !== 'drawing') return;
+    const drawer = room.players.find(player => player.id === room.drawer);
+    if (drawer) drawer.score += painterPoints(room.turnGuesses, room.turnGuessers.size);
     if (!room.penaltyPlayed && Date.now() >= room.deadline && room.turnGuesses === 0 && room.actions.length > 0
       && room.players.some(player => player.id !== room.drawer && this.playerSocket(player.id)?.connected)) {
       this.badgeStats(room, room.drawer!).misunderstood = true;
@@ -270,6 +281,7 @@ export class Game {
         reporters: new Set(), lastReportAt: 0, penaltyPlayed: false,
         hint: '',
         banned: new Set(), completedGames: 0, visibility, badgeStats: new Map(), turnGuesses: 0,
+        turnDuration: 0, finalWindow: 0, turnGuessers: new Set(), hintPlan: [], hintIndex: 0,
       };
       this.rooms.set(code, room); this.membership.set(socket.id, code); socket.join(code);
       this.system(room, `${name} creó la sala. ¡Que entre la tropa!`); this.broadcast(room);
@@ -284,6 +296,7 @@ export class Game {
       if (room.players.length >= 12) throw new Error('La sala está llena (12 jugadores).');
       if (room.players.some(player => normalize(player.name) === normalize(name))) throw new Error('Ese apodo ya está en la sala.');
       room.players.push({ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId), badges: this.store.badges(socket.data.userId) });
+      if (room.phase === 'drawing') room.turnGuessers.add(socket.id);
       this.membership.set(socket.id, code); socket.join(code);
       this.system(room, `${name} llegó. ¡Ahora sí!`);
       if (!['lobby', 'finished'].includes(room.phase)) {
@@ -397,18 +410,31 @@ export class Game {
           if (/\berror\s+de\s+capa\s*8\b/i.test(text)) room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
           this.system(room!, response);
         } else room!.messages.push({ id: randomUUID(), name: player.name, senderId: socket.id, text, kind: 'chat' });
+        if (creatorPrank(text)) {
+          socket.volatile.emit('game:creator-prank', { code: room!.code });
+          this.system(room!, `¡${player.name} es un traidor! Al creador se lo respeta, pues. 👑`, 'prank');
+        }
       };
       if (room!.phase === 'drawing') {
         if (Date.now() >= room!.deadline) throw new Error('El tiempo para adivinar terminó.');
         if (room!.drawer === socket.id || player.guessed) throw new Error('Espera al siguiente turno para chatear.');
         if (normalize(text) === normalize(room!.word)) {
+          const now = Date.now(), remaining = Math.max(0, room!.deadline - now);
+          const first = room!.turnGuesses === 0;
+          if (first) {
+            room!.finalWindow = finalGuessWindow(room!.turnDuration, remaining);
+            if (room!.finalWindow < remaining) {
+              this.schedule(room!, room!.finalWindow, () => this.reveal(room!));
+              this.scheduleHints(room!, room!.finalWindow);
+            }
+          }
           player.guessed = true;
           room!.turnGuesses++;
           const stats = this.badgeStats(room!, player.id); stats.guesses++; stats.roundGuesses++;
-          const remaining = Math.max(0, room!.deadline - Date.now()) / (room!.settings.duration * 1000);
-          player.score += 100 + Math.round(remaining * 400);
-          const drawer = room!.players.find(p => p.id === room!.drawer);
-          if (drawer) drawer.score += 100;
+          const points = first ? 60 : followingGuessPoints(remaining, room!.finalWindow);
+          player.score += points;
+          // Personal, ephemeral feedback: don't broadcast or replay it on recovery.
+          socket.volatile.emit('game:guessed', { id: randomUUID(), code: room!.code, points });
           this.system(room!, `¡${player.name} adivinó!`, 'correct');
           if (room!.players.filter(p => p.id !== room!.drawer).every(p => p.guessed)) { this.reveal(room!); return; }
         } else {
@@ -449,6 +475,9 @@ export class Game {
       this.requireDrawer(socket, room!);
       if (action.tool === 'text' && !action.text) throw new Error('Escribe una pista antes de tocar el lienzo.');
       if (action.tool === 'text' && normalize(action.text!).includes(normalize(room!.word))) {
+        const player = room!.players.find(player => player.id === socket.id)!;
+        this.system(room!, `¡${player.name} intentó agarrar un camino fácil escribiendo la respuesta! Acá se dibuja, pues. 👀`, 'prank');
+        this.broadcast(room!);
         throw new Error('¡No escribas la respuesta en el dibujo, pues!');
       }
       if (room!.actions.length >= MAX_DRAW_ACTIONS || room!.pointCount + action.points.length > 60000) throw new Error('Lienzo lleno. Deshaz o limpia para seguir.');

@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chatEasterEgg, startEasterEgg } from '../server/easterEggs.js';
+import { chatEasterEgg, creatorPrank, startEasterEgg } from '../server/easterEggs.js';
 import { motdMessages } from '../shared/motd.js';
 import { normalize } from '../server/store.js';
+
+test('broma al creador: tres frases, mayúsculas, espacios y límites de palabra', () => {
+  for (const text of ['Vladi fresco', 'VLADI GRAN PVTA', 'vladi puto', 'jaja VlAdI   FrEsCo!', 'Vladi gran  pvta']) assert.equal(creatorPrank(text), true, text);
+  for (const text of ['hola Vladi', 'Vladi frescor', 'Vladi putoso', 'otrovladi fresco', 'Vladi gran persona']) assert.equal(creatorPrank(text), false, text);
+});
 
 test('easter eggs de chat: comandos, frase, variantes y vocabulario del MOTD', () => {
   assert.equal(chatEasterEgg('Es un ERROR de CAPA 8, pues'), 'Se detectó un problema entre la silla y la pantalla');

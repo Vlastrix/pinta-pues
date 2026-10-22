@@ -119,6 +119,116 @@ export const SOUNDBOARD_CLIPS = [
     "id": "yametekudasai",
     "name": "yametekudasai",
     "file": "yametekudasai.mp3"
+  },
+  {
+    "id": "ack",
+    "name": "ack",
+    "file": "ack.mp3"
+  },
+  {
+    "id": "auraa",
+    "name": "auraa",
+    "file": "auraa.mp3"
+  },
+  {
+    "id": "awkward-cricket-sound-effect",
+    "name": "awkward cricket sound effect",
+    "file": "awkward-cricket-sound-effect.mp3"
+  },
+  {
+    "id": "baby-laughing-meme",
+    "name": "baby laughing meme",
+    "file": "baby-laughing-meme.mp3"
+  },
+  {
+    "id": "chicken-on-tree-screaming",
+    "name": "chicken on tree screaming",
+    "file": "chicken-on-tree-screaming.mp3"
+  },
+  {
+    "id": "faaah",
+    "name": "faaah",
+    "file": "faaah.mp3"
+  },
+  {
+    "id": "gopgopgop",
+    "name": "gopgopgop",
+    "file": "gopgopgop.mp3"
+  },
+  {
+    "id": "indian-song",
+    "name": "indian song",
+    "file": "indian-song.mp3"
+  },
+  {
+    "id": "kids-saying-yay-sound-effect-3",
+    "name": "kids saying yay sound effect 3",
+    "file": "kids-saying-yay-sound-effect_3.mp3"
+  },
+  {
+    "id": "latigo",
+    "name": "latigo",
+    "file": "latigo.mp3"
+  },
+  {
+    "id": "miau-triste",
+    "name": "miau triste",
+    "file": "miau-triste.mp3"
+  },
+  {
+    "id": "perfect-fart",
+    "name": "perfect fart",
+    "file": "perfect-fart.mp3"
+  },
+  {
+    "id": "pobre-carlitos",
+    "name": "pobre carlitos",
+    "file": "pobre-carlitos.mp3"
+  },
+  {
+    "id": "pou-no-sound-effect",
+    "name": "pou no sound effect",
+    "file": "pou-no-sound-effect.mp3"
+  },
+  {
+    "id": "pucta-que-rico",
+    "name": "pucta que rico",
+    "file": "pucta-que-rico.mp3"
+  },
+  {
+    "id": "sonido-perturbador",
+    "name": "sonido perturbador",
+    "file": "sonido-perturbador.mp3"
+  },
+  {
+    "id": "tf-nemesis",
+    "name": "tf nemesis",
+    "file": "tf_nemesis.mp3"
+  },
+  {
+    "id": "tiki-tiki",
+    "name": "tiki tiki",
+    "file": "tiki-tiki.mp3"
+  },
+  {
+    "id": "undertakers-bell-2uwfcie",
+    "name": "undertakers bell 2UwFCIe",
+    "file": "undertakers-bell_2UwFCIe.mp3"
+  },
+  {
+    "id": "wrong-answer-sound-effect",
+    "name": "wrong answer sound effect",
+    "file": "wrong-answer-sound-effect.mp3"
+  },
+  {
+    "id": "yapee",
+    "name": "yapee",
+    "file": "yapee.mp3"
+  },
+  {
+    "id": "zvuk-fotoapparata",
+    "name": "zvuk fotoapparata",
+    "file": "zvuk-fotoapparata.mp3"
   }
 ] as const;
 

@@ -53,6 +53,9 @@ export class Store {
     const insert = this.db.prepare('INSERT OR IGNORE INTO words(category, text) VALUES (?, ?)');
     this.db.exec('BEGIN');
     try {
+      // Rename the existing category while preserving words in deployed databases.
+      this.db.prepare('UPDATE OR IGNORE words SET category = ? WHERE category = ?').run('Fantasía y mitología', 'Fantasía');
+      this.db.prepare('DELETE FROM words WHERE category = ?').run('Fantasía');
       for (const [category, words] of Object.entries(seeds)) for (const word of words) insert.run(category, word);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }

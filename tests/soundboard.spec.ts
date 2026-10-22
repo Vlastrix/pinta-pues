@@ -53,7 +53,8 @@ test('soundboard: audio real compartido, silencio y volumen independientes, pref
     expect(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await guest.getByRole('button', { name: 'Cerrar soundboard' }).click();
     await guest.getByRole('button', { name: 'Salir de la sala', exact: true }).click();
-    await guest.reload(); await guest.getByRole('button', { name: 'Entrar a la sala' }).click(); await guest.getByRole('button', { name: 'Abrir soundboard' }).click();
+    await expect(guest.getByRole('button', { name: 'Entrar a la sala' })).toBeVisible();
+    await guest.goto(`/?sala=${code}`); await guest.getByRole('button', { name: 'Entrar a la sala' }).click(); await guest.getByRole('button', { name: 'Abrir soundboard' }).click();
     await expect(guest.getByRole('button', { name: 'Activar soundboard' })).toBeVisible(); await expect(guest.getByLabel('Volumen del soundboard')).toHaveValue('20');
     await expect(guest.getByRole('region', { name: 'Soundboard' }).locator('.soundboard-clips button').first()).toBeDisabled();
   } finally { await context.close(); }
@@ -91,6 +92,37 @@ test('panel flotante: permite chat, dibujo y envíos repetidos; se mueve y cabe 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.keyboard.press('Escape'); await expect(board).toHaveCount(0);
   } finally { await context.close(); }
+});
+
+test('soundboard: cambia de tamaño, distribuye los audios y conserva controles en móvil', async ({ page }) => {
+  await page.goto('/'); await page.getByLabel('¿Cómo te dice la tropa?').fill('Tamaño');
+  await page.getByRole('button', { name: '¡Armemos la sala!' }).click();
+  await page.getByRole('button', { name: 'Abrir soundboard' }).click();
+  const board = page.getByRole('region', { name: 'Soundboard' });
+  const grip = (await board.getByRole('button', { name: 'Mover soundboard' }).boundingBox())!;
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2); await page.mouse.down(); await page.mouse.move(30, 30, { steps: 4 }); await page.mouse.up();
+  const before = (await board.boundingBox())!, handle = board.getByRole('button', { name: 'Cambiar tamaño del soundboard' });
+  const corner = (await handle.boundingBox())!;
+  await page.mouse.move(corner.x + corner.width / 2, corner.y + corner.height / 2); await page.mouse.down();
+  await page.mouse.move(corner.x + corner.width / 2 + 250, corner.y + corner.height / 2 + 100, { steps: 5 }); await page.mouse.up();
+  const grown = (await board.boundingBox())!;
+  expect(grown.width).toBeGreaterThan(before.width + 200); expect(grown.height).toBeGreaterThan(before.height + 50);
+  expect(await board.locator('.soundboard-clips').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBeGreaterThan(2);
+  await handle.focus(); await handle.press('ArrowLeft');
+  await expect.poll(async () => (await board.boundingBox())!.width).toBeCloseTo(grown.width - 20, 0);
+  await board.getByLabel('Buscar audio').fill('uwu'); await expect(board.getByRole('button', { name: 'uwu', exact: true })).toBeVisible();
+  const customWidth = (await board.boundingBox())!.width;
+  await board.getByRole('button', { name: 'Cerrar soundboard' }).click(); await page.getByRole('button', { name: 'Abrir soundboard' }).click();
+  expect((await board.boundingBox())!.width).toBeCloseTo(customWidth, 0);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await expect.poll(async () => { const b = (await board.boundingBox())!; return b.x >= 0 && b.x + b.width <= 320 && b.y >= 0 && b.y + b.height <= 640; }).toBe(true);
+  await handle.focus(); for (let i = 0; i < 18; i++) await handle.press('ArrowUp');
+  await expect(handle).toBeInViewport(); await expect(board.getByLabel('Buscar audio')).toBeVisible();
+  await expect(board.getByRole('button', { name: 'uwu', exact: true })).toBeInViewport();
+  await page.screenshot({ path: 'test-results/soundboard-resized-mobile.png' });
+  await page.getByLabel('Tu respuesta o mensaje').fill('Sigo en el chat'); await page.getByRole('button', { name: 'Enviar mensaje' }).click();
+  await expect(page.getByText('Sigo en el chat', { exact: true })).toBeVisible();
+  await expect(board).toBeVisible();
 });
 
 test('todos los archivos importados se pueden decodificar en el navegador', async ({ page }) => {

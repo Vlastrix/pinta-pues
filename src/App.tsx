@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { io } from 'socket.io-client';
-import { ArrowRight, Check, Circle, Copy, Crown, Eraser, Flag, Heart, LogOut, Minus, MoreHorizontal, PaintBucket, Pencil, Play, Plus, Send, Sparkles, Square, Star, Trash2, Trophy, Type, Undo2, Users } from 'lucide-react';
+import { ArrowRight, Check, Circle, Copy, Crown, Eraser, FlagTriangleRight, Heart, LogOut, Minus, MoreHorizontal, PaintBucket, Pencil, Play, Plus, Send, Sparkles, Square, Star, Trash2, Trophy, Type, Undo2, Users } from 'lucide-react';
 import type { AccountUser, CursorUpdate, DrawingCursor, DrawAction, RoomView, Settings, SoundEffect, Tool } from '../shared/types';
 import { AVATAR_PATTERN, DEFAULT_AVATAR, MAX_BRUSH_SIZE } from '../shared/types';
 import { Canvas } from './Canvas';
 import { BrushSizeControl } from './BrushSizeControl';
+import { GuessCelebration } from './GuessCelebration';
+import { CreatorPrank } from './CreatorPrank';
+import type { GuessRewardEvent } from '../shared/types';
 import { SoundPlayer } from './sound';
 import { AvatarImage, AvatarPicker } from './AvatarPicker';
 import { AccountPanel } from './AccountPanel';
@@ -79,7 +82,13 @@ export default function App() {
   const [chatFocused, setChatFocused] = useState(false);
   const [volume, setVolume] = useState(0.35); const [loadingAudio, setLoadingAudio] = useState(false);
   const [now, setNow] = useState(Date.now()); const offset = useRef(0); const bottom = useRef<HTMLDivElement>(null);
-  const sounds = useRef<SoundPlayer | null>(null); const previousCorrect = useRef<string | undefined>(undefined);
+  const sounds = useRef<SoundPlayer | null>(null);
+  const [guessReward, setGuessReward] = useState<GuessRewardEvent | null>(null);
+  const [creatorPrankOpen, setCreatorPrankOpen] = useState(false);
+  useEffect(() => {
+    if (creatorPrankOpen) void sounds.current?.play('creator-prank').catch(() => toast('No se pudo reproducir el audio de la broma.'));
+  }, [creatorPrankOpen]);
+  const guessTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const soundboard = useRef<SoundboardPlayer | null>(null);
   const [soundboardMuted, setSoundboardMuted] = useState(() => localStorage.getItem('pinta-soundboard-muted') === 'true');
   const [soundboardVolume, setSoundboardVolume] = useState(() => {
@@ -134,6 +143,8 @@ export default function App() {
   useEffect(() => {
     let active = true;
     let roomOnWire: RoomView | null = null;
+    const celebrated = new Set<string>();
+    const clearCelebration = () => { clearTimeout(guessTimer.current); setGuessReward(null); setCreatorPrankOpen(false); sounds.current?.stop(); };
     let bufferedActions: DrawAction[] = [];
     let bufferedCursor: CursorUpdate | null = null;
     let frame: number | undefined;
@@ -159,13 +170,14 @@ export default function App() {
       }
     };
     const onDisconnect = (reason: string) => {
+      clearCelebration();
       soundboard.current?.stop();
       clearBufferedUpdates(); setRemoteCursor(null); setConnected(false); setPending(false);
       if (['transport close', 'transport error', 'ping timeout'].includes(reason)) return;
       roomOnWire = null; setRoom(null);
     };
     const onState = (next: RoomView) => {
-      if (roomOnWire && roomOnWire.code !== next.code) soundboard.current?.stop();
+      if (roomOnWire && roomOnWire.code !== next.code) { soundboard.current?.stop(); clearCelebration(); }
       clearBufferedUpdates(); roomOnWire = next; if (next.phase !== 'drawing') setRemoteCursor(null);
       offset.current = next.serverTime - Date.now(); setRoom(next); setCode(next.code);
       const badges = next.players.find(player => player.id === next.you)?.badges ?? [];
@@ -181,11 +193,21 @@ export default function App() {
     };
     const onHint = (hint: string) => setRoom(previous => previous?.phase === 'drawing' ? { ...previous, hint } : previous);
     socket.on('word:hint', onHint);
-    const onLeft = () => { soundboard.current?.stop(); clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setRoom(null); history.replaceState({}, '', location.pathname); };
+    const onLeft = () => { clearCelebration(); soundboard.current?.stop(); clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setRoom(null); history.replaceState({}, '', location.pathname); };
     const onKicked = ({ reason }: { reason: string }) => { onLeft(); setModeratingId(null); toast(reason); };
     socket.on('room:kicked', onKicked);
     const onSound = (effect: SoundEffect) => { if (effect === 'report' || effect === 'penalty') void sounds.current?.play(effect).catch(() => toast('No se pudo reproducir el audio.')); };
     socket.on('sound:play', onSound);
+    const onGuessed = (event: GuessRewardEvent) => {
+      if (event.code !== roomOnWire?.code || celebrated.has(event.id)) return;
+      if (celebrated.size >= 32) celebrated.delete(celebrated.values().next().value!);
+      celebrated.add(event.id); clearTimeout(guessTimer.current); setGuessReward(event);
+      guessTimer.current = setTimeout(() => setGuessReward(null), 2800);
+      void sounds.current?.correct().catch(() => toast('No se pudo reproducir el audio de acierto.'));
+    };
+    socket.on('game:guessed', onGuessed);
+    const onCreatorPrank = (event: { code: string }) => { if (event.code === roomOnWire?.code) setCreatorPrankOpen(true); };
+    socket.on('game:creator-prank', onCreatorPrank);
     const onSoundboard = (event: SoundboardEvent) => {
       if (event.code === roomOnWire?.code) void soundboard.current?.play(event.id).catch(() => toast('No se pudo reproducir el audio del soundboard.'));
     };
@@ -199,7 +221,7 @@ export default function App() {
     window.addEventListener('online', reconnect);
     void session().then(data => { if (active) { applyAccount(data.user); socket.connect(); } }).catch(() => { if (active) { toast('No se pudo preparar la sesión. Recarga para intentar otra vez.'); } });
     const timer = setInterval(() => setNow(Date.now()), 250);
-    return () => { active = false; document.removeEventListener('visibilitychange', reconnect); window.removeEventListener('online', reconnect); clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); socket.off('soundboard:play', onSoundboard); socket.off('game:flavor', onFlavor); sounds.current?.mute(); soundboard.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
+    return () => { active = false; document.removeEventListener('visibilitychange', reconnect); window.removeEventListener('online', reconnect); clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); socket.off('game:guessed', onGuessed); socket.off('game:creator-prank', onCreatorPrank); clearTimeout(guessTimer.current); socket.off('soundboard:play', onSoundboard); socket.off('game:flavor', onFlavor); sounds.current?.mute(); soundboard.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
   }, []);
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -222,11 +244,6 @@ export default function App() {
     const focused = document.activeElement;
     if (window.matchMedia('(max-width: 650px)').matches && focused instanceof HTMLInputElement && focused.id === 'guess') focused.blur();
   }, [room?.code, room?.phase, room?.drawer]);
-  useEffect(() => {
-    const message = room?.messages.filter(message => message.kind === 'correct').at(-1);
-    if (message && previousCorrect.current && previousCorrect.current !== message.id && !muted) void sounds.current?.correct().catch(() => toast('No se pudo reproducir el audio de acierto.'));
-    previousCorrect.current = message?.id ?? 'none';
-  }, [room?.messages, muted]);
   useEffect(() => {
     const previous = previousGame.current;
     if (room?.phase === 'finished' && previous?.code === room.code && previous.phase !== 'finished' && !muted) {
@@ -290,6 +307,7 @@ export default function App() {
     return emit('board:action', action);
   }
   return <div className={`app-shell${saltenaMode ? ' saltena-mode' : ''}`}>
+    {creatorPrankOpen && <CreatorPrank onClose={() => setCreatorPrankOpen(false)} />}
     <header className="site-header">
       <a className="brand" href="/" onClick={event => {
         event.preventDefault();
@@ -351,6 +369,8 @@ export default function App() {
               {isHost && room.players.length < 2 && <small className="minimum-note">Falta al menos un amigo para empezar.</small>}
             </div> : <><Canvas actions={room.actions} enabled={drawing} tool={tool} color={color} size={size} onAction={sendAction} onSizeChange={changeSize}
               remoteCursor={room.phase === 'drawing' && remoteCursor?.drawer === room.drawer ? remoteCursor.cursor : null} onCursor={sendCursor} />
+              {guessReward && <GuessCelebration key={guessReward.id} points={guessReward.points} />}
+              {room.phase === 'drawing' && !isDrawer && <button className={`report-button board-report${room.reported ? ' is-reported' : ''}`} aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} aria-pressed={room.reported} disabled={!connected || room.reported} title={`${room.reported ? 'Pintor reportado' : 'Reportar al pintor'} (${room.reportCount}/${room.reportRequired}). Si todos reportan, se revela la palabra y pasa el turno. Los puntos no cambian.`} onClick={() => emit('game:report', {})}>{room.reported ? <Check size={20} /> : <FlagTriangleRight size={20} />}{room.reportCount > 0 && <span className="report-count" aria-hidden="true">{room.reportCount}/{room.reportRequired}</span>}</button>}
               {room.phase === 'choosing' && <div className="board-overlay"><span className="choice-icon"><Pencil size={32} /></span><h2>{isDrawer ? '¿Qué vas a dibujar?' : 'Se está cocinando el dibujo…'}</h2><p>{isDrawer ? 'Elegí una. La tropa confía en tu talento.' : 'En un ratito empieza el turno.'}</p>{room.choices && <div className="word-choices">{room.choices.map(word => <button className="button secondary" key={word} onClick={() => emit('game:choose', { word })}>{word}</button>)}</div>}</div>}
               {room.phase === 'reveal' && <div className="reveal-banner">
                 <span className="reveal-icon"><Sparkles size={30} /></span>
@@ -358,7 +378,6 @@ export default function App() {
               </div>}
             </>}
           </div>
-          {room.phase === 'drawing' && !isDrawer && <div className="report-row"><button className="report-button" aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} disabled={room.reported} title="Si todos reportan al pintor, se revela la palabra y pasa el turno. Los puntos no cambian." onClick={() => emit('game:report', {})}><Flag size={14} />{room.reported ? 'Pintor reportado' : 'Reportar al pintor'}<span>{room.reportCount}/{room.reportRequired}</span></button></div>}
           <div className={`toolbar panel ${!drawing ? 'disabled-tools' : ''}`}><div className="tools">{toolOptions.map(({ id, label, icon: Icon, shortcuts }) => <button className={`tool-button ${tool === id ? 'selected' : ''}`} title={`${label} (${shortcuts.join(' / ').toUpperCase()})`} aria-label={label} aria-keyshortcuts={shortcuts.join(' ').toUpperCase()} aria-pressed={tool === id} key={id} disabled={!drawing} onClick={() => setTool(id)}><Icon size={19} /></button>)}<span className="tool-divider" /><button className="tool-button" title="Deshacer (Ctrl+Z / ⌘Z)" aria-label="Deshacer" aria-keyshortcuts="Control+Z Meta+Z" disabled={!drawing || !room.actions.length} onClick={() => emit('board:undo', {})}><Undo2 size={18} /></button><button className="tool-button" title="Limpiar lienzo" aria-label="Limpiar lienzo" disabled={!drawing || !room.actions.length} onClick={() => emit('board:clear', {})}><Trash2 size={17} /></button></div>
             <div className="color-row"><div className="palette">{colors.map(value => <button key={value} aria-label={`Color ${value}`} title={value} disabled={!drawing} className={`swatch ${color === value ? 'selected' : ''}`} style={{ background: value }} onClick={() => setColor(value)} />)}<label className="custom-color" title="Otro color"><Plus size={15} /><input type="color" aria-label="Color personalizado" disabled={!drawing} value={color} onChange={e => setColor(e.target.value)} /></label></div><BrushSizeControl size={size} disabled={!drawing} onChange={setSize} /></div>
           </div>

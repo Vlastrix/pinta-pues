@@ -141,11 +141,16 @@ test('insignias: hechos reales, sin duplicados, persistentes en cuenta, ranking 
     assert.deepEqual((await jar.request('/api/session')).data.user.badges, earned);
     assert.deepEqual((await jar.request('/api/leaderboard')).data[0].badges, earned);
     assert.deepEqual(f.state(host).players[0].badges, earned);
+    // With two players, one correct guess now gives both painter and guesser 60.
+    // Use a third player to create a real last place rather than a tie.
+    const third = await f.connect(); await f.emit(third, 'room:join', { name: 'Tercero', code });
     await f.emit(host, 'game:start');
     const word = f.state(host).choices![0]; await f.emit(host, 'game:choose', { word });
-    await f.emit(guest, 'chat:send', { text: word });
     await f.wait(guest, state => state.phase === 'choosing' && Boolean(state.choices));
     await f.emit(guest, 'game:choose', { word: f.state(guest).choices![0] });
+    await f.emit(third, 'chat:send', { text: f.state(guest).word });
+    await f.wait(third, state => state.phase === 'choosing' && Boolean(state.choices));
+    await f.emit(third, 'game:choose', { word: f.state(third).choices![0] });
     await f.wait(host, state => state.phase === 'finished');
     assert.ok((await jar.request('/api/session')).data.user.badges.includes('last-place'));
     const rows = f.app.store.db.prepare('SELECT badge_id FROM user_badges WHERE user_id = ?').all(signup.data.user.id);

@@ -9,11 +9,22 @@ test('texto en un área del lienzo: ajuste, multilínea, cancelar, confirmar y s
   try {
     await guest.goto(`/?sala=${code}`); await guest.getByLabel('¿Cómo te dice la tropa?').fill('Amigo');
     await guest.getByRole('button', { name: 'Entrar a la sala' }).click();
-    await page.getByRole('button', { name: '¡A pintar, pues!' }).click(); await page.locator('.word-choices button').first().click();
+    await page.getByRole('button', { name: '¡A pintar, pues!' }).click();
+    const choice = page.locator('.word-choices button').first(), word = (await choice.innerText()).trim(); await choice.click();
     await page.getByRole('button', { name: 'Texto', exact: true }).click();
     await expect(page.getByLabel('Texto para el lienzo')).toHaveCount(0);
     const canvas = page.getByLabel('Lienzo para dibujar'); const editor = page.getByLabel('Texto para el lienzo');
     const bounds = (await canvas.boundingBox())!;
+    await canvas.click({ position: { x: 50, y: 40 } }); await editor.fill(word); await editor.press('Enter');
+    await expect(page.getByRole('status')).toContainText('No escribas la respuesta');
+    for (const tab of [page, guest]) {
+      const notice = tab.locator('.message.prank strong');
+      await expect(notice).toHaveText('¡Artista intentó agarrar un camino fácil escribiendo la respuesta! Acá se dibuja, pues. 👀');
+      await expect(notice).toHaveCSS('font-weight', '800');
+    }
+    await expect(editor).toBeFocused(); await expect(editor).toHaveValue(word);
+    await expect(page.getByRole('button', { name: 'Deshacer', exact: true })).toBeDisabled();
+    await editor.press('Escape');
     // Drag backwards as well: the box must always have positive dimensions.
     await page.mouse.move(bounds.x + 280, bounds.y + 180); await page.mouse.down();
     await page.mouse.move(bounds.x + 50, bounds.y + 40, { steps: 5 }); await page.mouse.up();

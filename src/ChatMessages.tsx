@@ -8,7 +8,7 @@ export function ChatMessages({ messages, you, onDelete }: {
     && (a.senderId && b.senderId ? a.senderId === b.senderId : a.name === b.name);
   return messages.map((message, index) => {
     if (message.kind !== 'chat') return <div className={`message ${message.kind}`} key={message.id}>
-      <span>{message.kind === 'correct' ? '✦ ' : ''}{message.text}</span>
+      {message.kind === 'prank' ? <strong>{message.text}</strong> : <span>{message.kind === 'correct' ? '✦ ' : ''}{message.text}</span>}
     </div>;
     const start = !sameAuthor(messages[index - 1], message);
     const end = !sameAuthor(messages[index + 1], message);

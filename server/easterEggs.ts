@@ -1,6 +1,10 @@
 import { motdMessages } from '../shared/motd.js';
 import { normalize } from './store.js';
 
+export function creatorPrank(text: string): boolean {
+  return /\bvladi\s+(?:fresco|gran\s+pvta|puto)\b/i.test(text);
+}
+
 export function chatEasterEgg(text: string, hiddenWord?: string, random = Math.random): string | null {
   const safe = (message: string) => !hiddenWord || !normalize(message).includes(normalize(hiddenWord));
   let message: string | undefined;
