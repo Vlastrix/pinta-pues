@@ -9,6 +9,71 @@ import { createApp } from '../server/app.js';
 import { normalize, Store } from '../server/store.js';
 import type { RoomView, DrawAction } from '../shared/types.js';
 
+test('partes correctas: privadas, acumulativas, sin puntos ni recorte de tiempo hasta completar; reinicio por turno', async () => {
+  const f = await fixture({ choice: 30000, turn: 30000, reveal: 100 });
+  try {
+    const host = await f.connect(), guest = await f.connect(), other = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Pintor' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { name: 'Uno', code }); await f.emit(other, 'room:join', { name: 'Dos', code });
+    await f.emit(host, 'room:words', { words: ['candado digital', 'palabraalfa', 'palabrabeta'] });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Personalizadas'] });
+    await f.emit(host, 'game:start'); await f.emit(host, 'game:choose', { word: 'candado digital' });
+    const initial = await f.wait(guest, state => state.phase === 'drawing'), deadline = initial.deadline, messages = initial.messages.length;
+    const celebrations: unknown[] = []; guest.on('game:guessed', value => celebrations.push(value));
+    assert.equal((await f.emit(guest, 'chat:send', { text: 'CANDADO' })).ok, true);
+    const partial = await f.wait(guest, state => state.partialGuess === true);
+    assert.equal(partial.hint, 'candado _______'); assert.equal(partial.word, undefined);
+    assert.equal(partial.players.find(player => player.id === guest.id)!.score, 0);
+    assert.equal(partial.players.find(player => player.id === guest.id)!.guessed, false);
+    assert.equal(partial.deadline, deadline); assert.equal(partial.messages.length, messages);
+    assert.equal(f.state(other).hint, '_______ _______'); assert.equal(f.state(other).partialGuess, undefined);
+    assert.equal(f.state(host).partialGuess, undefined); assert.equal(celebrations.length, 0);
+    // Any later room snapshot must keep discoveries private and cumulative.
+    await f.emit(other, 'chat:send', { text: 'hola' });
+    await f.wait(guest, state => state.messages.length > messages);
+    assert.equal(f.state(guest).hint, 'candado _______'); assert.equal(f.state(other).hint, '_______ _______');
+    await new Promise(resolve => setTimeout(resolve, 360));
+    await f.emit(guest, 'chat:send', { text: 'candado' });
+    assert.equal(celebrations.length, 0);
+    await new Promise(resolve => setTimeout(resolve, 360));
+    await f.emit(guest, 'chat:send', { text: 'digital' });
+    const correct = await f.wait(guest, state => state.players.some(player => player.id === guest.id && player.guessed));
+    assert.equal(correct.players.find(player => player.id === guest.id)!.score, 60);
+    assert.equal(celebrations.length, 1); assert.ok(correct.deadline < deadline);
+    assert.equal(f.state(other).partialGuess, undefined);
+    await new Promise(resolve => setTimeout(resolve, 360));
+    await f.emit(other, 'chat:send', { text: 'candado digital' });
+    await f.wait(host, state => state.phase === 'choosing');
+    assert.equal(f.app.game.rooms.get(code)!.partialGuesses.size, 0);
+    assert.equal(f.state(guest).partialGuess, undefined);
+  } finally { await f.close(); }
+});
+
+test('pistas del reloj conservan las partes privadas y los jugadores silenciados pueden completarlas', async () => {
+  const f = await fixture({ choice: 30000, turn: 4000, reveal: 100 });
+  try {
+    const host = await f.connect(), guest = await f.connect(), other = await f.connect();
+    await f.emit(host, 'room:create', { name: 'Pintor' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { name: 'Uno', code }); await f.emit(other, 'room:join', { name: 'Dos', code });
+    await f.emit(host, 'room:words', { words: ['árbol digital', 'palabraalfa', 'palabrabeta'] });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Personalizadas'] });
+    await f.emit(host, 'game:start'); await f.emit(host, 'game:choose', { word: 'árbol digital' });
+    await f.emit(host, 'room:moderate', { target: guest.id, action: 'mute' });
+    await f.emit(guest, 'chat:send', { text: 'ARBOL' });
+    await f.wait(guest, state => Boolean(state.partialGuess));
+    const timed: string[] = [], publicHints: string[] = [];
+    guest.on('word:hint', hint => timed.push(hint)); other.on('word:hint', hint => publicHints.push(hint));
+    const until = Date.now() + 2500;
+    while (!timed.length && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(timed.length); assert.ok(timed[0].startsWith('árbol '));
+    assert.ok(!publicHints[0].startsWith('árbol '));
+    assert.equal((await f.emit(guest, 'chat:send', { text: 'hola' })).ok, false);
+    await new Promise(resolve => setTimeout(resolve, 360));
+    assert.equal((await f.emit(guest, 'chat:send', { text: 'digital' })).ok, true);
+    await f.wait(guest, state => state.players.some(player => player.id === guest.id && player.guessed));
+  } finally { await f.close(); }
+});
+
 test('celebración de acierto: privada, puntos exactos y sin repetir en estados posteriores', async () => {
   const f = await fixture();
   try {

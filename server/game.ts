@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { tools, WIDTH, HEIGHT, DEFAULT_AVATAR, AVATAR_PATTERN, MAX_DRAW_ACTIONS, MAX_BRUSH_SIZE, RECONNECT_GRACE_MS, type DrawAction, type Message, type Player, type RoomView, type Settings } from '../shared/types.js';
 import { Store, normalize } from './store.js';
 import { hintSteps, maskWord } from './hints.js';
+import { matchingParts, completedParts, personalHint } from './partialGuesses.js';
 import { WindowLimiter } from './security.js';
 import type { BadgeId } from '../shared/badges.js';
 import { chatEasterEgg, creatorPrank, startEasterEgg } from './easterEggs.js';
@@ -23,6 +24,7 @@ type Room = {
   badgeStats: Map<string, BadgeStats>; turnGuesses: number;
   turnDuration: number; finalWindow: number; turnGuessers: Set<string>; duel: boolean;
   hintPlan: ReturnType<typeof hintSteps>; hintIndex: number;
+  partialGuesses: Map<string, Set<string>>;
 };
 const nameSchema = z.string().trim().min(2, 'Tu apodo necesita al menos 2 letras.').max(20);
 const avatarSchema = z.string().regex(AVATAR_PATTERN, 'Elige un avatar válido.').default(DEFAULT_AVATAR);
@@ -63,7 +65,8 @@ export class Game {
     return {
       code: room.code, you: id, host: room.host, players: room.players.map(player => ({ ...player, connected: this.io.sockets.sockets.has(player.id) })), phase: room.phase, visibility: room.visibility,
       settings: room.settings, round: room.round, drawer: room.drawer, deadline: room.deadline,
-      serverTime: Date.now(), hint: room.hint,
+      serverTime: Date.now(), hint: personalHint(room.word, room.hint, room.partialGuesses.get(id)),
+      ...(room.partialGuesses.get(id)?.size ? { partialGuess: true } : {}),
       ...(secret && room.word ? { word: room.word } : {}),
       ...(room.drawer === id && room.phase === 'choosing' ? { choices: room.choices } : {}),
       actions: room.actions, messages: room.messages, availableCategories: [...this.store.categories(), 'Personalizadas'],
@@ -94,7 +97,7 @@ export class Game {
         if (room.phase !== 'drawing' || Date.now() >= room.deadline) return;
         room.hint = step.hint;
         room.hintIndex = index + 1;
-        this.io.to(room.code).emit('word:hint', room.hint);
+        for (const player of room.players) this.io.to(player.id).emit('word:hint', personalHint(room.word, room.hint, room.partialGuesses.get(player.id)));
         nextHint(index + 1);
       }, Math.max(0, startedAt + duration * (step.progress - previousProgress) / (1 - previousProgress) - Date.now()));
     };
@@ -123,6 +126,7 @@ export class Game {
     room.round = next.round;
     room.drawer = next.id; room.phase = 'choosing'; room.word = ''; room.actions = []; room.pointCount = 0;
     room.hint = '';
+    room.partialGuesses.clear();
     room.reporters.clear(); room.lastReportAt = 0; room.penaltyPlayed = false;
     room.players.forEach(player => { player.guessed = false; });
     const allWords = [...this.store.words(room.settings.categories), ...(room.settings.categories.includes('Personalizadas') ? room.customWords : [])];
@@ -169,6 +173,7 @@ export class Game {
       this.badgeStats(room, room.drawer!).misunderstood = true;
     }
     room.phase = 'reveal';
+    room.partialGuesses.clear();
     this.system(room, `La palabra era «${room.word}».`);
     this.schedule(room, this.timing.reveal, () => this.next(room));
     this.broadcast(room);
@@ -189,6 +194,7 @@ export class Game {
     this.clearTimers(room); room.phase = 'lobby'; room.drawer = null; room.deadline = 0;
     room.word = ''; room.choices = []; room.actions = []; room.pointCount = 0; room.round = 0;
     room.hint = '';
+    room.partialGuesses.clear();
     room.players.forEach(player => { player.guessed = false; });
     this.system(room, 'Esperando al menos dos jugadores para empezar.'); this.broadcast(room);
   }
@@ -226,6 +232,7 @@ export class Game {
     const player = room.players.find(player => player.id === socket.id)!;
     room.players = room.players.filter(player => player.id !== socket.id);
     room.badgeStats.delete(socket.id);
+    room.partialGuesses.delete(socket.id);
     room.reporters.delete(socket.id);
     if (!room.players.length) { this.clearTimers(room); this.rooms.delete(room.code); return; }
     if (room.host === socket.id) room.host = room.players[0].id;
@@ -287,6 +294,7 @@ export class Game {
         hint: '',
         banned: new Set(), completedGames: 0, visibility, badgeStats: new Map(), turnGuesses: 0,
         turnDuration: 0, finalWindow: 0, turnGuessers: new Set(), duel: false, hintPlan: [], hintIndex: 0,
+        partialGuesses: new Map(),
       };
       this.rooms.set(code, room); this.membership.set(socket.id, code); socket.join(code);
       this.issueRoomSession(socket, code);
@@ -410,7 +418,8 @@ export class Game {
       if (Date.now() - lastChat < 350) throw new Error('Dale un respiro al chat.');
       lastChat = Date.now();
       const player = room!.players.find(player => player.id === socket.id)!;
-      if (player.muted && !(room!.phase === 'drawing' && socket.id !== room!.drawer && !player.guessed && normalize(text) === normalize(room!.word))) throw new Error('Tu chat está silenciado. Solo puedes enviar la respuesta correcta.');
+      const matches = room!.phase === 'drawing' ? matchingParts(room!.word, text) : [];
+      if (player.muted && !(room!.phase === 'drawing' && socket.id !== room!.drawer && !player.guessed && (normalize(text) === normalize(room!.word) || matches.length))) throw new Error('Tu chat está silenciado. Solo puedes enviar respuestas correctas o partes correctas.');
       const postMessage = () => {
         const response = chatEasterEgg(text, room!.phase === 'drawing' ? room!.word : undefined, Math.random, player.name);
         if (response) {
@@ -425,7 +434,16 @@ export class Game {
       if (room!.phase === 'drawing') {
         if (Date.now() >= room!.deadline) throw new Error('El tiempo para adivinar terminó.');
         if (room!.drawer === socket.id || player.guessed) throw new Error('Espera al siguiente turno para chatear.');
-        if (normalize(text) === normalize(room!.word)) {
+        if (matches.length) {
+          const found = room!.partialGuesses.get(socket.id) ?? new Set<string>();
+          for (const part of matches) found.add(part);
+          room!.partialGuesses.set(socket.id, found);
+          if (!completedParts(room!.word, found)) {
+            socket.emit('room:state', this.view(room!, socket.id));
+            return;
+          }
+        }
+        if (normalize(text) === normalize(room!.word) || (matches.length && completedParts(room!.word, room!.partialGuesses.get(socket.id)!))) {
           const now = Date.now(), remaining = Math.max(0, room!.deadline - now);
           const first = room!.turnGuesses === 0;
           if (first) {
@@ -543,6 +561,8 @@ export class Game {
     for (const entry of room!.queue) if (entry.id === oldId) entry.id = socket.id;
     const stats = room!.badgeStats.get(oldId);
     if (stats) { room!.badgeStats.delete(oldId); room!.badgeStats.set(socket.id, stats); }
+    const partial = room!.partialGuesses.get(oldId);
+    if (partial) { room!.partialGuesses.delete(oldId); room!.partialGuesses.set(socket.id, partial); }
     for (const ids of [room!.reporters, room!.turnGuessers]) if (ids.delete(oldId)) ids.add(socket.id);
     for (const message of room!.messages) if (message.senderId === oldId) message.senderId = socket.id;
     this.resumeTokens.delete(token); delete oldSocket.data.roomToken;

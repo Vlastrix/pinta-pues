@@ -32,6 +32,31 @@ async function fixture(reconnect = 2000) {
   return { app, cookie, register, connect, emit, wait, tickets, failures, state: (socket: Socket) => states.get(socket)!, close: async () => { sockets.forEach(socket => socket.disconnect()); await app.close(); } };
 }
 
+test('recargar conserva partes descubiertas solo para el adivinador y permite completar la respuesta', async () => {
+  const f = await fixture();
+  try {
+    const ownerCookie = await f.cookie(), guestCookie = await f.cookie();
+    const host = await f.connect(ownerCookie), guest = await f.connect(guestCookie);
+    await f.emit(host, 'room:create', { name: 'Pintor' }); const code = f.state(host).code;
+    await f.emit(guest, 'room:join', { code, name: 'Adivinador' });
+    await f.emit(host, 'room:words', { words: ['candado digital', 'palabraalfa', 'palabrabeta'] });
+    await f.emit(host, 'room:settings', { rounds: 1, duration: 30, categories: ['Personalizadas'] });
+    await f.emit(host, 'game:start'); await f.emit(host, 'game:choose', { word: 'candado digital' });
+    await f.emit(guest, 'chat:send', { text: 'candado' });
+    await f.wait(() => Boolean(f.state(guest).partialGuess));
+    const oldId = guest.id!;
+    const restored = await f.connect(guestCookie, f.tickets.get(guest));
+    await f.wait(() => Boolean(f.state(restored)));
+    assert.equal(f.state(restored).hint, 'candado _______'); assert.equal(f.state(restored).partialGuess, true);
+    assert.equal(f.state(restored).players.find(player => player.id === restored.id)!.score, 0);
+    assert.equal(f.state(host).partialGuess, undefined);
+    assert.equal(f.app.game.rooms.get(code)!.partialGuesses.has(oldId), false);
+    await f.emit(restored, 'chat:send', { text: 'digital' });
+    await f.wait(() => f.state(restored).players.some(player => player.id === restored.id && player.guessed));
+    assert.ok(f.state(restored).players.find(player => player.id === restored.id)!.score > 0);
+  } finally { await f.close(); }
+});
+
 test('recargar: transfiere anfitrión, pintor, puntos, votos y cola; credencial privada y rotada', async () => {
   const f = await fixture();
   try {

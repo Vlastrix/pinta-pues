@@ -29,7 +29,7 @@ export type RoomVisibility = 'private' | 'public';
 export type RoomView = {
   code: string; you: string; host: string; players: Player[]; phase: Phase; visibility: RoomVisibility;
   settings: Settings; round: number; drawer: string | null;
-  deadline: number; serverTime: number; hint: string; word?: string; choices?: string[];
+  deadline: number; serverTime: number; hint: string; word?: string; choices?: string[]; partialGuess?: boolean;
   actions: DrawAction[]; messages: Message[]; availableCategories: string[]; customWordCount: number; reported: boolean;
   reportCount: number; reportRequired: number;
 };
