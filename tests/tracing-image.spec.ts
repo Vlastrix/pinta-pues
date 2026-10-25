@@ -21,6 +21,13 @@ for (const mobile of [false, true]) test(`referencia privada para calcar: ${mobi
       const ctx = image.getContext('2d')!; ctx.fillStyle = '#e02020'; ctx.fillRect(0, 0, 300, 200);
       return image.toDataURL().split(',')[1];
     });
+    // Vite serves the test page; enforce the backend's actual production image policy too.
+    const health = await page.request.get('/api/health');
+    const imagePolicy = health.headers()['content-security-policy'].split(';').find(rule => rule.trim().startsWith('img-src'))!;
+    await page.evaluate(policy => {
+      const meta = document.createElement('meta'); meta.httpEquiv = 'Content-Security-Policy'; meta.content = policy;
+      document.head.append(meta);
+    }, imagePolicy);
     const upload = page.getByLabel('Imagen para calcar', { exact: true });
     await upload.setInputFiles({ name: 'referencia.png', mimeType: 'image/png', buffer: Buffer.from(data, 'base64') });
     const reference = page.getByAltText('Referencia privada para calcar');
