@@ -49,6 +49,7 @@ export class Game {
   private activity = new WindowLimiter();
   private reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private disconnectedSockets = new Map<string, Socket>();
+  private resumeTokens = new Map<string, string>();
   private closing = false;
   constructor(private io: Server, private store: Store, private timing: { choice: number; reveal: number; turn?: number; reconnect?: number } = { choice: 15000, reveal: 5000 }) {
     io.on('connection', socket => this.connect(socket));
@@ -216,6 +217,7 @@ export class Game {
     return badges;
   }
   private leave(socket: Socket) {
+    if (socket.data.roomToken) this.resumeTokens.delete(socket.data.roomToken);
     clearTimeout(this.reconnectTimers.get(socket.id)); this.reconnectTimers.delete(socket.id);
     this.disconnectedSockets.delete(socket.id);
     const room = this.rooms.get(this.membership.get(socket.id) ?? '');
@@ -245,6 +247,8 @@ export class Game {
         for (const name of socket.rooms) if (name !== socket.id) socket.leave(name);
         socket.emit('room:left');
       }
+    } else if (socket.handshake.auth.roomSession) {
+      if (!this.resumeRoom(socket)) socket.emit('room:resume-failed');
     }
     let windowStart = Date.now(); let events = 0; let lastChat = 0;
     const handle = <T>(event: string, schema: z.ZodType<T>, callback: (data: T, room?: Room) => void, needsRoom = true) => {
@@ -285,6 +289,7 @@ export class Game {
         turnDuration: 0, finalWindow: 0, turnGuessers: new Set(), duel: false, hintPlan: [], hintIndex: 0,
       };
       this.rooms.set(code, room); this.membership.set(socket.id, code); socket.join(code);
+      this.issueRoomSession(socket, code);
       this.system(room, `${name} creó la sala. ¡Que entre la tropa!`); this.broadcast(room);
     };
     const joinRoom = ({ name, avatar, code }: { name: string; avatar: string; code: string }) => {
@@ -299,6 +304,7 @@ export class Game {
       room.players.push({ id: socket.id, name, avatar, score: 0, guessed: false, muted: false, registered: Boolean(socket.data.userId), badges: this.store.badges(socket.data.userId) });
       if (room.phase === 'drawing') room.turnGuessers.add(socket.id);
       this.membership.set(socket.id, code); socket.join(code);
+      this.issueRoomSession(socket, code);
       this.system(room, `${name} llegó. ¡Ahora sí!`);
       if (!['lobby', 'finished'].includes(room.phase)) {
         for (let round = room.round + 1; round <= room.settings.rounds; round++) room.queue.push({ id: socket.id, round });
@@ -509,12 +515,51 @@ export class Game {
   private requireHost(socket: Socket, room: Room) {
     if (room.host !== socket.id) throw new Error('Solo el anfitrión puede hacer eso.');
   }
+  private issueRoomSession(socket: Socket, code: string) {
+    if (socket.data.roomToken) this.resumeTokens.delete(socket.data.roomToken);
+    const token = randomBytes(32).toString('hex');
+    socket.data.roomToken = token; this.resumeTokens.set(token, socket.id);
+    // Never include this credential in the public room snapshot.
+    socket.emit('room:session', { code, token });
+  }
+  private resumeRoom(socket: Socket) {
+    const parsed = z.object({ code: z.string().regex(/^[A-F0-9]{6}$/), token: z.string().regex(/^[a-f0-9]{64}$/) }).safeParse(socket.handshake.auth.roomSession);
+    if (!parsed.success) return false;
+    const { code, token } = parsed.data;
+    const oldId = this.resumeTokens.get(token);
+    const room = this.rooms.get(code);
+    const oldSocket = oldId ? this.playerSocket(oldId) : undefined;
+    const player = room?.players.find(player => player.id === oldId);
+    if (!oldId || !oldSocket || !player || this.membership.get(oldId) !== code) return false;
+    if (oldSocket.data.userId !== socket.data.userId
+      || !(oldSocket.data.identities as string[]).some(id => id.startsWith('guest:') && (socket.data.identities as string[]).includes(id))
+      || (socket.data.identities as string[]).some(id => room!.banned.has(id))) return false;
+    clearTimeout(this.reconnectTimers.get(oldId)); this.reconnectTimers.delete(oldId);
+    this.disconnectedSockets.delete(oldId); this.membership.delete(oldId);
+    this.membership.set(socket.id, code); socket.join(code);
+    player.id = socket.id;
+    if (room!.host === oldId) room!.host = socket.id;
+    if (room!.drawer === oldId) room!.drawer = socket.id;
+    for (const entry of room!.queue) if (entry.id === oldId) entry.id = socket.id;
+    const stats = room!.badgeStats.get(oldId);
+    if (stats) { room!.badgeStats.delete(oldId); room!.badgeStats.set(socket.id, stats); }
+    for (const ids of [room!.reporters, room!.turnGuessers]) if (ids.delete(oldId)) ids.add(socket.id);
+    for (const message of room!.messages) if (message.senderId === oldId) message.senderId = socket.id;
+    this.resumeTokens.delete(token); delete oldSocket.data.roomToken;
+    // Cover reloads whose new connection arrives before the old transport closes.
+    oldSocket.leave(code); oldSocket.emit('room:left'); oldSocket.disconnect(true);
+    this.issueRoomSession(socket, code);
+    this.io.to(code).emit('board:cursor', { drawer: socket.id, cursor: null });
+    this.broadcast(room!);
+    return true;
+  }
   private playerSocket(id: string) { return this.io.sockets.sockets.get(id) ?? this.disconnectedSockets.get(id); }
   private requireDrawer(socket: Socket, room: Room) {
     if (room.drawer !== socket.id || room.phase !== 'drawing' || Date.now() >= room.deadline) throw new Error('Todavía no es tu turno para dibujar.');
   }
   close() {
     this.closing = true;
+    this.resumeTokens.clear();
     for (const timer of this.reconnectTimers.values()) clearTimeout(timer);
     this.reconnectTimers.clear();
     this.disconnectedSockets.clear();

@@ -41,10 +41,12 @@ test('móvil: adivinar junto al dibujo, chat sin saltos y herramientas al cambia
     const canvas = phone.getByLabel('Dibujo de la partida');
     const input = phone.getByLabel('Tu respuesta o mensaje');
     const chat = phone.locator('.chat-panel'); const players = phone.locator('.players-panel');
+    expect((await chat.locator('.messages').boundingBox())!.height).toBeGreaterThanOrEqual(160);
     expect((await chat.boundingBox())!.y).toBeLessThan((await players.boundingBox())!.y);
     expect((await input.boundingBox())!.y + (await input.boundingBox())!.height).toBeLessThanOrEqual(844);
     expect((await canvas.boundingBox())!.y).toBeGreaterThanOrEqual(0);
     await phone.setViewportSize({ width: 360, height: 640 });
+    expect((await chat.locator('.messages').boundingBox())!.height).toBeGreaterThanOrEqual(120);
     await phone.evaluate(() => window.scrollTo(0, 0));
     await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height; }).toBeLessThanOrEqual(640);
     await phone.setViewportSize({ width: 390, height: 844 });
@@ -62,6 +64,7 @@ test('móvil: adivinar junto al dibujo, chat sin saltos y herramientas al cambia
     await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height; }).toBeLessThanOrEqual(420);
     const smallCanvas = (await canvas.boundingBox())!;
     const smallInput = (await input.boundingBox())!;
+    expect((await chat.locator('.messages').boundingBox())!.height).toBeGreaterThanOrEqual(80);
     expect(smallCanvas.width / smallCanvas.height).toBeCloseTo(1.5, 1);
     expect(smallCanvas.y).toBeGreaterThanOrEqual(0);
     expect(smallCanvas.y + smallCanvas.height).toBeLessThan(smallInput.y);

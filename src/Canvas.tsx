@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import { WIDTH, HEIGHT, DRAW_INTERVAL_MS, CURSOR_INTERVAL_MS, type DrawAction, type DrawingCursor as Cursor, type Point, type Tool } from '../shared/types';
 import { DrawingScene, RENDER_SCALE } from './DrawingScene';
 import { DrawingCursor } from './DrawingCursor';
@@ -10,8 +10,9 @@ type Props = {
   onAction: (action: DrawAction) => Promise<boolean>;
   onSizeChange: (delta: number) => void;
   remoteCursor: Cursor | null; onCursor: (cursor: Cursor | null) => void;
+  children?: ReactNode;
 };
-export function Canvas({ actions, enabled, tool, color, size, onAction, onSizeChange, remoteCursor, onCursor }: Props) {
+export function Canvas({ actions, enabled, tool, color, size, onAction, onSizeChange, remoteCursor, onCursor, children }: Props) {
   const base = useRef<HTMLCanvasElement>(null); const overlay = useRef<HTMLCanvasElement>(null);
   const stroke = useRef<DrawAction | null>(null); const lastSent = useRef(0);
   const freshPoints = useRef(0);
@@ -265,6 +266,7 @@ export function Canvas({ actions, enabled, tool, color, size, onAction, onSizeCh
       style={{ left: `${editor.points[0].x / WIDTH * 100}%`, top: `${editor.points[0].y / HEIGHT * 100}%`, width: `${(editor.points[1].x - editor.points[0].x) / WIDTH * 100}%`, height: `${(editor.points[1].y - editor.points[0].y) / HEIGHT * 100}%`, color: editor.color, fontFamily: TEXT_FONT, fontSize: textLayout(overlay.current!.getContext('2d')!, editor.text || 'Texto', editor.points[1].x - editor.points[0].x, editor.points[1].y - editor.points[0].y).size * scale }}
       onChange={event => setEditor(previous => previous ? { ...previous, text: event.target.value } : null)} onBlur={() => void finishText()}
       onKeyDown={event => { if (event.nativeEvent.isComposing) return; if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditor(null); } else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void finishText(); } }} />}
+    {children}
     {!editor && (enabled ? localCursor : remoteCursor) && <DrawingCursor cursor={(enabled ? localCursor : remoteCursor)!} />}
   </div>;
 }

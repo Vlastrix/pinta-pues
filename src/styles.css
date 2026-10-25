@@ -244,19 +244,19 @@ button { padding: 0; }
   .game-page:has(.active-round) { padding-top: 12px; }
   .active-round .turn-header { margin-bottom: 10px; }
   .active-round .turn-header .word-strip { min-height: 44px; padding: 6px 10px; }
-  .active-round { gap: 10px; }
+  .active-round { gap: 10px; --mobile-chat-height: clamp(120px, calc(var(--visual-height, 100dvh) * .2), 200px); }
   .active-round.is-guessing .disabled-tools,
   .active-round .board-caption { display: none; }
   .active-round.is-guessing .canvas-stack {
     min-height: 0;
-    width: min(100%, max(180px, calc((var(--visual-height, 100dvh) - 470px) * 1.5)));
+    width: min(100%, max(180px, calc((var(--visual-height, 100dvh) - 400px - var(--mobile-chat-height)) * 1.5)));
     margin-inline: auto;
   }
   .active-round .report-row { margin-top: 6px; }
   .active-round > .chat-panel { height: auto; min-height: 0; max-height: none; }
   .active-round .chat-panel > .panel-heading { min-height: 36px; padding: 7px 12px; }
   .active-round .sound-volume { padding: 6px 12px; }
-  .active-round .messages { flex: none; height: clamp(36px, calc(var(--visual-height, 100dvh) * .085), 72px); padding: 8px 12px; overscroll-behavior-y: contain; }
+  .active-round .messages { flex: none; height: var(--mobile-chat-height); padding: 8px 12px; overscroll-behavior-y: contain; }
   .active-round .message { margin-bottom: 8px; }
   .chat-panel .chat-form input { height: 38px; padding: 7px 42px 7px 10px; font-size: 16px; line-height: 22px; }
   .chat-panel .chat-form button { width: 38px; height: 38px; right: 1px; top: 0; padding: 0; }
@@ -270,7 +270,7 @@ button { padding: 0; }
     margin-inline: auto;
   }
   .chat-focused .active-round .sound-volume { display: none; }
-  .chat-focused .active-round .messages { height: clamp(32px, calc(var(--visual-height, 100dvh) * .09), 56px); }
+  .chat-focused .active-round .messages { height: clamp(80px, calc(var(--visual-height, 100dvh) * .2), 140px); }
 }
 .site-header > .brand, .site-header > .header-right { flex-shrink: 0; }
 .site-header > .motd { flex: 1; min-width: 0; max-width: 440px; margin-inline: auto; color: var(--deep); font-size: 13px; font-style: italic; line-height: 1.6; text-align: center; overflow-wrap: anywhere; }
@@ -382,3 +382,20 @@ button { padding: 0; }
 @keyframes guess-reward { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.75) rotate(-5deg); } 12% { opacity: 1; transform: translate(-50%, -50%) scale(1.04) rotate(1deg); } 20%, 82% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -60%) scale(.97); } }
 @keyframes guess-spark { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.2); } 20% { opacity: 1; } 100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(.6) rotate(90deg); } }
 @media (prefers-reduced-motion: reduce) { .guess-celebration { animation: none; } .guess-sparks { display: none; } }
+.tracing-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--border); }
+.tracing-controls .button { padding: 8px 12px; font-size: 13px; min-height: 40px; }
+.tracing-controls label { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; flex: 1 1 130px; font-size: 12px; min-width: 0; }
+.tracing-controls input[type=range] { grid-column: 1 / -1; width: 100%; min-height: 24px; accent-color: var(--purple); }
+.tracing-controls small { flex-basis: 100%; font-size: 11px; }
+.tracing-controls [role=alert] { color: #cf5353; }
+.tracing-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; mix-blend-mode: multiply; }
+.tracing-layer.is-moving { pointer-events: auto; }
+.tracing-image { position: absolute; transform: translate(-50%, -50%); padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; pointer-events: none; opacity: 1; }
+.tracing-image:disabled { opacity: 1; }
+.tracing-image:not(:disabled):active { transform: translate(-50%, -50%); }
+.tracing-image { transition: none; }
+.tracing-controls input[type=range] { padding: 0; }
+.tracing-image img { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; }
+.is-moving .tracing-image { pointer-events: auto; cursor: grab; touch-action: none; outline: 2px dashed #7460bf; outline-offset: 2px; }
+.is-moving .tracing-image:active { cursor: grabbing; }
+.is-moving .tracing-image:focus-visible { outline-style: solid; }

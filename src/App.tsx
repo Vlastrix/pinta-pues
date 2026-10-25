@@ -4,6 +4,7 @@ import { ArrowRight, Check, Circle, Copy, Crown, Eraser, FlagTriangleRight, Hear
 import type { AccountUser, CursorUpdate, DrawingCursor, DrawAction, RoomView, Settings, SoundEffect, Tool } from '../shared/types';
 import { AVATAR_PATTERN, DEFAULT_AVATAR, MAX_BRUSH_SIZE } from '../shared/types';
 import { Canvas } from './Canvas';
+import { useTracingImage } from './useTracingImage';
 import { BrushSizeControl } from './BrushSizeControl';
 import { GuessCelebration } from './GuessCelebration';
 import { WinnerEmblem } from './WinnerEmblem';
@@ -23,10 +24,12 @@ import { Leaderboard } from './Leaderboard';
 import { Badges } from './Badges';
 import { Soundboard } from './Soundboard';
 import { EffectsPanel } from './EffectsPanel';
+import { clearRoomSession, readRoomSession, saveRoomSession } from './roomSession';
+import type { RoomSession } from './roomSession';
 import { SoundboardPlayer } from './soundboardPlayer';
 import type { SoundboardEvent } from '../shared/soundboard';
 
-const socket = io({ autoConnect: false });
+const socket = io({ autoConnect: false, auth: callback => callback({ roomSession: readRoomSession() }) });
 let sessionRequest: Promise<{ user: AccountUser | null }> | undefined;
 function session() {
   return sessionRequest ??= fetch('/api/session', { credentials: 'same-origin' }).then(response => {
@@ -76,7 +79,7 @@ export default function App() {
     return saved && AVATAR_PATTERN.test(saved) ? saved : DEFAULT_AVATAR;
   });
   const [code, setCode] = useState(() => new URLSearchParams(location.search).get('sala')?.slice(0, 6).toUpperCase() ?? '');
-  const [joining, setJoining] = useState(Boolean(code)); const [pending, setPending] = useState(false);
+  const [joining, setJoining] = useState(Boolean(code)); const [pending, setPending] = useState(() => Boolean(readRoomSession()));
   const [notice, setNotice] = useState(''); const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [tool, setTool] = useState<Tool>('brush'); const [color, setColor] = useState(colors[0]); const [size, setSize] = useState(6);
   const [chat, setChat] = useState(''); const [words, setWords] = useState(''); const [muted, setMuted] = useState(false);
@@ -125,6 +128,18 @@ export default function App() {
     } catch { setSoundboardMuted(true); toast('No se pudo activar el soundboard. Intenta otra vez.'); }
     finally { setLoadingSoundboard(false); }
   }
+  useEffect(() => {
+    if (!room || sounds.current || soundboard.current) return;
+    // A restored page needs a fresh user gesture to unlock Web Audio.
+    const remove = () => { window.removeEventListener('pointerdown', unlock); window.removeEventListener('keydown', unlock); };
+    const unlock = () => {
+      remove();
+      if (!muted) void enableSounds();
+      if (!soundboardMuted) void enableSoundboard();
+    };
+    window.addEventListener('pointerdown', unlock); window.addEventListener('keydown', unlock);
+    return remove;
+  }, [room?.code, muted, soundboardMuted]);
   function toggleSoundboard() {
     if (soundboardMuted) { void enableSoundboard(); return; }
     soundboard.current?.mute(); setSoundboardMuted(true); localStorage.setItem('pinta-soundboard-muted', 'true');
@@ -165,7 +180,7 @@ export default function App() {
     };
     const onConnect = () => {
       setConnected(true);
-      if (roomOnWire && !socket.recovered) {
+      if (roomOnWire && !socket.recovered && !readRoomSession()) {
         roomOnWire = null; setRoom(null);
         toast('No se pudo recuperar tu lugar. Vuelve a entrar a la sala.');
       }
@@ -175,12 +190,13 @@ export default function App() {
       soundboard.current?.stop();
       clearBufferedUpdates(); setRemoteCursor(null); setConnected(false); setPending(false);
       if (['transport close', 'transport error', 'ping timeout'].includes(reason)) return;
+      clearRoomSession();
       roomOnWire = null; setRoom(null);
     };
     const onState = (next: RoomView) => {
       if (roomOnWire && roomOnWire.code !== next.code) { soundboard.current?.stop(); clearCelebration(); }
       clearBufferedUpdates(); roomOnWire = next; if (next.phase !== 'drawing') setRemoteCursor(null);
-      offset.current = next.serverTime - Date.now(); setRoom(next); setCode(next.code);
+      offset.current = next.serverTime - Date.now(); setRoom(next); setCode(next.code); setPending(false);
       const badges = next.players.find(player => player.id === next.you)?.badges ?? [];
       setAccount(previous => previous && JSON.stringify(previous.badges) !== JSON.stringify(badges) ? { ...previous, badges } : previous);
       history.replaceState({}, '', `?sala=${next.code}`);
@@ -194,7 +210,13 @@ export default function App() {
     };
     const onHint = (hint: string) => setRoom(previous => previous?.phase === 'drawing' ? { ...previous, hint } : previous);
     socket.on('word:hint', onHint);
-    const onLeft = () => { clearCelebration(); soundboard.current?.stop(); clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setRoom(null); history.replaceState({}, '', location.pathname); };
+    const onLeft = () => { clearRoomSession(); clearCelebration(); soundboard.current?.stop(); clearBufferedUpdates(); roomOnWire = null; setRemoteCursor(null); setRoom(null); setPending(false); history.replaceState({}, '', location.pathname); };
+    const onRoomSession = (value: RoomSession) => saveRoomSession(value);
+    const onResumeFailed = () => {
+      clearRoomSession(); clearCelebration(); clearBufferedUpdates(); roomOnWire = null; setRoom(null); setPending(false); setJoining(true);
+      toast('Tu lugar ya no está disponible. Puedes volver a entrar si la sala sigue abierta.');
+    };
+    socket.on('room:session', onRoomSession); socket.on('room:resume-failed', onResumeFailed);
     const onKicked = ({ reason }: { reason: string }) => { onLeft(); setModeratingId(null); toast(reason); };
     socket.on('room:kicked', onKicked);
     const onSound = (effect: SoundEffect) => { if (effect === 'report' || effect === 'penalty') void sounds.current?.play(effect).catch(() => toast('No se pudo reproducir el audio.')); };
@@ -222,7 +244,7 @@ export default function App() {
     window.addEventListener('online', reconnect);
     void session().then(data => { if (active) { applyAccount(data.user); socket.connect(); } }).catch(() => { if (active) { toast('No se pudo preparar la sesión. Recarga para intentar otra vez.'); } });
     const timer = setInterval(() => setNow(Date.now()), 250);
-    return () => { active = false; document.removeEventListener('visibilitychange', reconnect); window.removeEventListener('online', reconnect); clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); socket.off('game:guessed', onGuessed); socket.off('game:creator-prank', onCreatorPrank); clearTimeout(guessTimer.current); socket.off('soundboard:play', onSoundboard); socket.off('game:flavor', onFlavor); sounds.current?.mute(); soundboard.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
+    return () => { active = false; document.removeEventListener('visibilitychange', reconnect); window.removeEventListener('online', reconnect); clearBufferedUpdates(); socket.off('room:kicked', onKicked); socket.off('board:cursor', onCursor); socket.off('word:hint', onHint); socket.off('sound:play', onSound); socket.off('game:guessed', onGuessed); socket.off('game:creator-prank', onCreatorPrank); clearTimeout(guessTimer.current); socket.off('soundboard:play', onSoundboard); socket.off('game:flavor', onFlavor); sounds.current?.mute(); soundboard.current?.mute(); socket.off('connect', onConnect); socket.off('disconnect', onDisconnect); socket.off('room:state', onState); socket.off('board:action', onAction); socket.off('room:left', onLeft); socket.off('room:session', onRoomSession); socket.off('room:resume-failed', onResumeFailed); socket.off('connect_error'); socket.disconnect(); clearInterval(timer); clearTimeout(noticeTimer.current); };
   }, []);
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -255,6 +277,7 @@ export default function App() {
   const isHost = room?.host === room?.you;
   const isDrawer = Boolean(room && room.drawer === room.you);
   const drawing = Boolean(connected && isDrawer && room?.phase === 'drawing');
+  const tracing = useTracingImage(isDrawer && room?.phase === 'drawing' ? `${room.code}:${room.round}:${room.drawer}` : null, drawing);
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
       if (!drawing || event.defaultPrevented || event.isComposing || event.repeat || document.querySelector('dialog[open]')) return;
@@ -368,8 +391,8 @@ export default function App() {
               {isHost && <details className="custom-words"><summary>+ Agregar las palabras de tu grupo</summary><form onSubmit={event => { event.preventDefault(); const list = words.split(/[,\n]/).map(word => word.trim()).filter(Boolean); emit('room:words', { words: list }, () => { setWords(''); toast('Palabras agregadas a esta sala.'); }); }}><textarea aria-label="Palabras personalizadas" placeholder="Una por línea o separadas por comas. Sí, las jergas también valen." value={words} maxLength={4000} onChange={e => setWords(e.target.value)} required /><button className="button secondary" type="submit">Agregar palabras</button></form><small>Privadas para esta sala; se borran cuando la sala se cierra.</small></details>}
               {isHost ? <button className="button primary start-button" disabled={room.players.length < 2} onClick={() => emit('game:start', {})}><Play size={17} fill="currentColor" />{room.phase === 'finished' ? '¡Sale la revancha!' : '¡A pintar, pues!'}</button> : <div className="waiting-host">El anfitrión decide cuándo arrancamos.</div>}
               {isHost && room.players.length < 2 && <small className="minimum-note">Falta al menos un amigo para empezar.</small>}
-            </div> : <><Canvas actions={room.actions} enabled={drawing} tool={tool} color={color} size={size} onAction={sendAction} onSizeChange={changeSize}
-              remoteCursor={room.phase === 'drawing' && remoteCursor?.drawer === room.drawer ? remoteCursor.cursor : null} onCursor={sendCursor} />
+            </div> : <><Canvas actions={room.actions} enabled={drawing && !tracing.moving} tool={tool} color={color} size={size} onAction={sendAction} onSizeChange={changeSize}
+              remoteCursor={room.phase === 'drawing' && remoteCursor?.drawer === room.drawer ? remoteCursor.cursor : null} onCursor={sendCursor}>{tracing.overlay}</Canvas>
               {guessReward && <GuessCelebration key={guessReward.id} points={guessReward.points} />}
               {room.phase === 'drawing' && !isDrawer && <button className={`report-button board-report${room.reported ? ' is-reported' : ''}`} aria-label={room.reported ? 'Pintor reportado' : 'Reportar al pintor'} aria-pressed={room.reported} disabled={!connected || room.reported} title={`${room.reported ? 'Pintor reportado' : 'Reportar al pintor'} (${room.reportCount}/${room.reportRequired}). Si todos reportan, se revela la palabra y pasa el turno. Los puntos no cambian.`} onClick={() => emit('game:report', {})}>{room.reported ? <Check className="report-icon" size={20} /> : <FlagTriangleRight className="report-icon" size={20} />}{room.reportCount > 0 && <span className="report-count" aria-hidden="true">{room.reportCount}/{room.reportRequired}</span>}</button>}
               {room.phase === 'choosing' && <div className="board-overlay"><span className="choice-icon"><Pencil size={32} /></span><h2>{isDrawer ? '¿Qué vas a dibujar?' : 'Se está cocinando el dibujo…'}</h2><p>{isDrawer ? 'Elegí una. La tropa confía en tu talento.' : 'En un ratito empieza el turno.'}</p>{room.choices && <div className="word-choices">{room.choices.map(word => <button className="button secondary" key={word} onClick={() => emit('game:choose', { word })}>{word}</button>)}</div>}</div>}
@@ -381,6 +404,7 @@ export default function App() {
           </div>
           <div className={`toolbar panel ${!drawing ? 'disabled-tools' : ''}`}><div className="tools">{toolOptions.map(({ id, label, icon: Icon, shortcuts }) => <button className={`tool-button ${tool === id ? 'selected' : ''}`} title={`${label} (${shortcuts.join(' / ').toUpperCase()})`} aria-label={label} aria-keyshortcuts={shortcuts.join(' ').toUpperCase()} aria-pressed={tool === id} key={id} disabled={!drawing} onClick={() => setTool(id)}><Icon size={19} /></button>)}<span className="tool-divider" /><button className="tool-button" title="Deshacer (Ctrl+Z / ⌘Z)" aria-label="Deshacer" aria-keyshortcuts="Control+Z Meta+Z" disabled={!drawing || !room.actions.length} onClick={() => emit('board:undo', {})}><Undo2 size={18} /></button><button className="tool-button" title="Limpiar lienzo" aria-label="Limpiar lienzo" disabled={!drawing || !room.actions.length} onClick={() => emit('board:clear', {})}><Trash2 size={17} /></button></div>
             <div className="color-row"><div className="palette">{colors.map(value => <button key={value} aria-label={`Color ${value}`} title={value} disabled={!drawing} className={`swatch ${color === value ? 'selected' : ''}`} style={{ background: value }} onClick={() => setColor(value)} />)}<label className="custom-color" title="Otro color"><Plus size={15} /><input type="color" aria-label="Color personalizado" disabled={!drawing} value={color} onChange={e => setColor(e.target.value)} /></label></div><BrushSizeControl size={size} disabled={!drawing} onChange={setSize} /></div>
+            {tracing.controls}
           </div>
           <p className="board-caption">{drawing ? tool === 'text' ? 'Arrastrá un área y escribí sobre el lienzo. Enter confirma, Shift+Enter agrega una línea y Escape cancela.' : 'Tu obra maestra empieza con un trazo.' : 'No hace falta dibujar bien para pasarla bien.'}<Heart size={13} /></p>
         </section>
