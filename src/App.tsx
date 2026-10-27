@@ -382,7 +382,7 @@ export default function App() {
         </div>}
 
           {editable && <div className="board-top"><div><span className="status-dot" /><strong>{room.phase === 'finished' ? '¡Tenemos ganador!' : 'Calentando los pinceles'}</strong></div></div>}
-          <div className="board-surface">
+          <div className={`board-surface${room.phase === 'choosing' ? ' is-choosing' : ''}`}>
             {editable ? <div className="lobby">
               {room.phase === 'finished' ? <div className="winner"><WinnerEmblem /><h2>¡{[...room.players].sort((a, b) => b.score - a.score)[0].name} se la lleva!</h2><p>Los puntos están a la izquierda. Las excusas van al chat.</p></div> : <><div className="lobby-doodle"><Doodle small /></div><h2>Que no falte nadie, pues.</h2><p>Comparte este enlace <button className="inline-code" onClick={invite}>{room.code} <Copy size={13} /></button> y prepará tu mejor peor dibujo.</p></>}
               <label className="room-visibility">Visibilidad<select aria-label="Visibilidad de la sala" disabled={!isHost} value={room.visibility} onChange={event => emit('room:visibility', { visibility: event.target.value })}><option value="private">Privada · Solo con código o enlace</option><option value="public">Pública · Cualquiera puede unirse</option></select></label>

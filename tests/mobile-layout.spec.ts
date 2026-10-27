@@ -32,8 +32,30 @@ test('móvil: adivinar junto al dibujo, chat sin saltos y herramientas al cambia
     expect((await phone.locator('.site-header').boundingBox())!.height).toBeLessThan(75);
     await phone.locator('.site-header').screenshot({ path: 'test-results/room-header-mobile.png' });
     await expect(page.getByRole('button', { name: '¡A pintar, pues!' })).toBeEnabled();
+    await page.locator('.custom-words summary').click();
+    await page.getByLabel('Palabras personalizadas').fill('mochila llena de libros, computadora de escritorio, caballero de armadura brillante');
+    await page.getByRole('button', { name: 'Agregar palabras', exact: true }).click();
+    await expect(page.locator('.category-picker').getByRole('button', { name: 'Personalizadas (3)', exact: true })).toHaveClass(/selected/);
+    for (const category of await page.locator('.category-picker button.selected').allTextContents()) {
+      if (!category.startsWith('Personalizadas')) await page.locator('.category-picker').getByRole('button', { name: category, exact: true }).click();
+    }
     await page.getByRole('button', { name: '¡A pintar, pues!' }).click();
-    const choice = page.locator('.word-choices button').first();
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 640 });
+      const surface = page.locator('.board-surface');
+      const bounds = (await surface.boundingBox())!;
+      await expect(page.locator('.word-choices button')).toHaveCount(3);
+      for (const element of await page.locator('.board-overlay > .choice-icon, .board-overlay h2, .board-overlay p, .word-choices button').all()) {
+        const box = (await element.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(bounds.x); expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+        expect(box.y).toBeGreaterThanOrEqual(bounds.y); expect(box.y + box.height).toBeLessThanOrEqual(bounds.y + bounds.height);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    }
+    await page.locator('.board-surface').screenshot({ path: 'test-results/mobile-word-choice.png' });
+    expect(await phone.locator('.board-overlay').evaluate(node => node.scrollHeight <= node.clientHeight)).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const choice = page.locator('.word-choices').getByRole('button', { name: 'caballero de armadura brillante', exact: true });
     const word = (await choice.innerText()).trim(); await choice.click();
     await expect(phone.locator('.game-grid')).toHaveClass(/is-guessing/);
     await expect(phone.locator('.toolbar')).toBeHidden();
@@ -41,12 +63,12 @@ test('móvil: adivinar junto al dibujo, chat sin saltos y herramientas al cambia
     const canvas = phone.getByLabel('Dibujo de la partida');
     const input = phone.getByLabel('Tu respuesta o mensaje');
     const chat = phone.locator('.chat-panel'); const players = phone.locator('.players-panel');
-    expect((await chat.locator('.messages').boundingBox())!.height).toBeGreaterThanOrEqual(160);
+    expect((await chat.locator('.messages').boundingBox())!.height).toBeGreaterThanOrEqual(230);
     expect((await chat.boundingBox())!.y).toBeLessThan((await players.boundingBox())!.y);
     expect((await input.boundingBox())!.y + (await input.boundingBox())!.height).toBeLessThanOrEqual(844);
     expect((await canvas.boundingBox())!.y).toBeGreaterThanOrEqual(0);
     await phone.setViewportSize({ width: 360, height: 640 });
-    expect((await chat.locator('.messages').boundingBox())!.height).toBeGreaterThanOrEqual(120);
+    expect((await chat.locator('.messages').boundingBox())!.height).toBeGreaterThanOrEqual(180);
     await phone.evaluate(() => window.scrollTo(0, 0));
     await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height; }).toBeLessThanOrEqual(640);
     await phone.setViewportSize({ width: 390, height: 844 });
@@ -64,7 +86,7 @@ test('móvil: adivinar junto al dibujo, chat sin saltos y herramientas al cambia
     await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height; }).toBeLessThanOrEqual(420);
     const smallCanvas = (await canvas.boundingBox())!;
     const smallInput = (await input.boundingBox())!;
-    expect((await chat.locator('.messages').boundingBox())!.height).toBeGreaterThanOrEqual(80);
+    expect((await chat.locator('.messages').boundingBox())!.height).toBeGreaterThanOrEqual(110);
     expect(smallCanvas.width / smallCanvas.height).toBeCloseTo(1.5, 1);
     expect(smallCanvas.y).toBeGreaterThanOrEqual(0);
     expect(smallCanvas.y + smallCanvas.height).toBeLessThan(smallInput.y);

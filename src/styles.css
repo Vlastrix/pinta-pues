@@ -244,7 +244,11 @@ button { padding: 0; }
   .game-page:has(.active-round) { padding-top: 12px; }
   .active-round .turn-header { margin-bottom: 10px; }
   .active-round .turn-header .word-strip { min-height: 44px; padding: 6px 10px; }
-  .active-round { gap: 10px; --mobile-chat-height: clamp(120px, calc(var(--visual-height, 100dvh) * .2), 200px); }
+  .active-round { gap: 10px; --mobile-chat-height: clamp(180px, calc(var(--visual-height, 100dvh) * .28), 280px); }
+  .active-round .board-surface.is-choosing .canvas-stack { display: none; }
+  .active-round .board-surface.is-choosing .board-overlay { position: relative; min-height: 220px; padding: 20px 14px; }
+  .active-round .board-surface.is-choosing .word-choices { width: 100%; }
+  .active-round .board-surface.is-choosing .word-choices .button { flex: 1 1 110px; min-width: 0; min-height: 44px; overflow-wrap: anywhere; }
   .active-round.is-guessing .disabled-tools,
   .active-round .board-caption { display: none; }
   .active-round.is-guessing .canvas-stack {
@@ -266,11 +270,12 @@ button { padding: 0; }
   .app-shell:has(.chat-focused .active-round) > .site-header { display: none; }
   .chat-focused:has(.active-round) { padding-top: 6px; }
   .chat-focused .active-round.is-guessing .canvas-stack {
-    width: min(100%, calc(var(--visual-height, 100dvh) * .42));
+    width: min(100%, calc(var(--visual-height, 100dvh) * .26));
     margin-inline: auto;
   }
   .chat-focused .active-round .sound-volume { display: none; }
-  .chat-focused .active-round .messages { height: clamp(80px, calc(var(--visual-height, 100dvh) * .2), 140px); }
+  .chat-focused .active-round .word-strip .hint { font-size: 15px; letter-spacing: 2px; }
+  .chat-focused .active-round .messages { height: clamp(110px, calc(var(--visual-height, 100dvh) * .27), 180px); }
 }
 .site-header > .brand, .site-header > .header-right { flex-shrink: 0; }
 .site-header > .motd { flex: 1; min-width: 0; max-width: 440px; margin-inline: auto; color: var(--deep); font-size: 13px; font-style: italic; line-height: 1.6; text-align: center; overflow-wrap: anywhere; }
